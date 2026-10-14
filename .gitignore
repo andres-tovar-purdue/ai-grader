@@ -251,3 +251,5 @@ __pycache__/
 # Private/generated student grading data
 **/grader/student_map.json
 **/grader/submission_manifest.json
+# Local source backups
+src/ai_grader/*.bak

@@ -8,17 +8,17 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from project_grader.ai_client import get_client
-from project_grader.artifact_validation import preflight_slx_artifacts
-from project_grader.grading_validation import (
+from ai_grader.ai_client import get_client
+from ai_grader.artifact_validation import preflight_slx_artifacts
+from ai_grader.grading_validation import (
     calculate_grading_result,
     validate_model_grading_response,
 )
-from project_grader.spec_validation import validate_grading_spec
-from project_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
+from ai_grader.spec_validation import latest_spec_path, validate_grading_spec
+from ai_grader.submission_checks import spec_fingerprint
+from ai_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
 
 
-GRADING_SPEC_FILENAME = "grading_spec_v001.json"
 SUBMISSION_MANIFEST_FILENAME = "submission_manifest.json"
 ANONYMIZED_FOLDER = "anonymized_submissions"
 GRADING_RUNS_FOLDER = "grading_runs"
@@ -87,7 +87,7 @@ def load_grading_inputs(project_path):
     """Load only the approved spec, sanitized manifest, and anonymized tree."""
     project_path = Path(project_path).resolve()
     grader_path = project_path / "grader"
-    spec_path = grader_path / GRADING_SPEC_FILENAME
+    spec_path = latest_spec_path(grader_path)
     manifest_path = grader_path / SUBMISSION_MANIFEST_FILENAME
     anonymized_root = grader_path / ANONYMIZED_FOLDER
 
@@ -131,16 +131,22 @@ def load_grading_inputs(project_path):
             f"Anonymized submissions folder does not exist: {anonymized_root}"
         )
 
+    if manifest.get("submission_count") != len(manifest.get("submissions", [])):
+        raise RuntimeError("Submission count does not match manifest entries.")
     expected_students = set()
     for submission in manifest.get("submissions", []):
         student_id = submission.get("student_id", "")
         if not re.fullmatch(r"Student_\d{3}", student_id):
             raise RuntimeError(f"Invalid anonymized student ID: {student_id}")
+        if student_id in expected_students:
+            raise RuntimeError("Duplicate anonymized student ID in submission manifest.")
         expected_students.add(student_id)
         student_root = (anonymized_root / student_id).resolve()
         if not student_root.is_dir() or student_root.parent != anonymized_root.resolve():
             raise RuntimeError(f"Invalid anonymized student folder: {student_id}")
 
+        if submission.get("file_count") != len(submission.get("files", [])):
+            raise RuntimeError("File count does not match submission manifest entries.")
         seen_paths = set()
         for file_info in submission.get("files", []):
             relative_path = Path(file_info["path"])
@@ -164,6 +170,26 @@ def load_grading_inputs(project_path):
             if file_info["path"] in seen_paths:
                 raise RuntimeError("Duplicate anonymized artifact path in manifest.")
             seen_paths.add(file_info["path"])
+
+        actual_paths = {p.relative_to(student_root).as_posix()
+                        for p in student_root.rglob("*") if p.is_file()}
+        if actual_paths != seen_paths:
+            raise RuntimeError("Anonymized artifact tree does not match manifest entries.")
+    if not expected_students:
+        raise RuntimeError("Submission manifest has no submissions to grade.")
+    filename_deliverables = {
+        rule["deliverable_id"] for task in spec["tasks"] for criterion in task["criteria"]
+        for rule in criterion.get("deduction_rules", []) if rule.get("basis") == "filename"
+    }
+    if filename_deliverables:
+        for submission in manifest["submissions"]:
+            checks = submission.get("deliverable_checks", {})
+            if (checks.get("method") != "original_filenames_local_v1"
+                    or checks.get("spec_sha256") != spec_fingerprint(spec)
+                    or filename_deliverables - {item["deliverable_id"]
+                                               for item in checks.get("checks", [])}):
+                raise RuntimeError("Original filename checks are missing or stale. Run "
+                                   "refresh-submission-checks for this project before grading.")
 
     actual_students = {
         path.name for path in anonymized_root.iterdir() if path.is_dir()
@@ -201,8 +227,83 @@ def build_student_input(spec, submission, student_root, instructions):
                 raise RuntimeError(
                     f"Anonymized text differs from manifest: {relative_path}"
                 )
+            if extension == ".ipynb":
+                notebook = json.loads(text)
+                sections = [
+                    "NOTEBOOK EVIDENCE: saved source and outputs; "
+                    "the notebook was not executed by the grader."
+                ]
+
+                def join_text(value):
+                    return "".join(value) if isinstance(value, list) else str(value)
+
+                for cell_index, cell in enumerate(notebook.get("cells", []), 1):
+                    sections.append(
+                        f"CELL {cell_index} ({cell.get('cell_type', 'unknown')}):\n"
+                        + join_text(cell.get("source", ""))
+                    )
+                    if cell.get("attachments"):
+                        sections.append(
+                            "Cell attachments were not extracted; require "
+                            "instructor review if relevant to a grading criterion."
+                        )
+
+                    for output_index, output in enumerate(cell.get("outputs", []), 1):
+                        if "text" in output:
+                            sections.append("SAVED OUTPUT:\n" + join_text(output["text"]))
+                        if output.get("output_type") == "error":
+                            sections.append(
+                                "SAVED ERROR:\n"
+                                + join_text(output.get("ename", ""))
+                                + ": " + join_text(output.get("evalue", ""))
+                                + "\n" + join_text(output.get("traceback", []))
+                            )
+
+                        data = output.get("data", {})
+                        if "text/plain" in data:
+                            sections.append(
+                                "SAVED OUTPUT:\n" + join_text(data["text/plain"])
+                            )
+
+                        for mime in ("image/png", "image/jpeg"):
+                            if mime in data:
+                                label = (
+                                    f"{relative_path}, cell {cell_index}, "
+                                    f"output {output_index}"
+                                )
+                                encoded = "".join(join_text(data[mime]).split())
+                                content.append({
+                                    "type": "input_text",
+                                    "text": (
+                                        f"NOTEBOOK IMAGE: {label}. Treat only "
+                                        "visible content as evidence. Flag "
+                                        "suspected visible identity."
+                                    ),
+                                })
+                                content.append({
+                                    "type": "input_image",
+                                    "image_url": f"data:{mime};base64,{encoded}",
+                                    "detail": "auto",
+                                })
+                                image_limitations.append(label)
+                                break
+
+                        if data and not any(
+                            key in data
+                            for key in ("text/plain", "image/png", "image/jpeg")
+                        ):
+                            sections.append(
+                                "Unsupported saved output formats: "
+                                + ", ".join(data)
+                                + ". Require instructor review if relevant."
+                            )
+
+                text = "\n\n".join(sections)
+
             text_sections.append(
-                f"ARTIFACT: {relative_path}\nEVIDENCE TYPE: source_code\n{text}"
+                f"ARTIFACT: {relative_path}\n"
+                f"EVIDENCE TYPE: {'notebook_source_and_saved_outputs' if extension == '.ipynb' else 'source_code'}\n"
+                f"{text}"
             )
         elif extension in IMAGE_EXTENSIONS:
             mime_type = mimetypes.guess_type(path.name)[0] or "image/png"
@@ -240,6 +341,14 @@ def build_student_input(spec, submission, student_root, instructions):
         instructions,
         "APPROVED GRADING SPECIFICATION:\n" + json.dumps(spec, indent=2),
         "ANONYMIZED ARTIFACT INVENTORY:\n" + json.dumps(artifact_inventory, indent=2),
+        "ORIGINAL FILENAME COMPLIANCE (checked locally before anonymization):\n"
+        + json.dumps(submission.get("deliverable_checks", {"status": "not_available"}), indent=2),
+        "Anonymized names and <username> placeholders are tool transformations. "
+        "Never infer filename errors from them or from redacted save commands. "
+        "Use only the original filename compliance checks. no_exact_match means "
+        "the exact required original filename was not found; it does not prove "
+        "the artifact content is missing. PDFs receive presence-only verification; "
+        "if their contents are needed, flag instructor review without penalizing a tool limitation.",
         "TEXT AND PRESENCE EVIDENCE:\n" + "\n\n---\n\n".join(text_sections),
         (
             "IMAGE PRIVACY LIMITATION:\nImage filenames and filesystem paths are "
@@ -269,13 +378,14 @@ def next_grading_run_path(grader_path):
 
 
 def render_preliminary_csv(results, spec):
-    task_columns = [
-        f"task_{index}_feedback"
-        for index, _ in enumerate(spec["tasks"], start=1)
-    ]
+    task_columns = [column for index, _ in enumerate(spec["tasks"], start=1)
+                    for column in (f"task_{index}_score", f"task_{index}_max_points", f"task_{index}_feedback")]
     fieldnames = [
         "student_id",
         "total_agent_score",
+        "maximum_score",
+        "raw_total_before_rounding",
+        "total_rounding_adjustment",
         "total_instructor_score",
         *task_columns,
         "review_required",
@@ -288,11 +398,16 @@ def render_preliminary_csv(results, spec):
         row = {
             "student_id": result["student_id"],
             "total_agent_score": result["total_agent_score"],
+            "maximum_score": spec["project"]["total_points"],
+            "raw_total_before_rounding": result["raw_total_before_rounding"],
+            "total_rounding_adjustment": result["total_rounding_adjustment"],
             "total_instructor_score": "",
             "review_required": str(result["review_required"]).lower(),
             "review_reasons": " | ".join(result["review_reasons"]),
         }
         for index, task in enumerate(result["tasks"], start=1):
+            row[f"task_{index}_score"] = task["agent_score"]
+            row[f"task_{index}_max_points"] = task["max_points"]
             row[f"task_{index}_feedback"] = task["feedback"]
         writer.writerow(row)
     return stream.getvalue()
@@ -326,7 +441,8 @@ def grade_submissions(
     results = []
     per_student_usage = []
 
-    for submission in manifest["submissions"]:
+    for index, submission in enumerate(manifest["submissions"], start=1):
+        print(f"Grading {submission['student_id']} ({index}/{len(manifest['submissions'])})...", flush=True)
         student_root = anonymized_root / submission["student_id"]
         api_input = build_student_input(
             spec,
@@ -355,6 +471,22 @@ def grade_submissions(
             raise RuntimeError(
                 f"The model returned no grading result for {submission['student_id']}."
             )
+        debug_path = project_path / "grader" / "debug_responses"
+        debug_path.mkdir(parents=True, exist_ok=True)
+        response_path = debug_path / (
+            f"{submission['student_id']}_"
+            f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.json"
+        )
+        response_path.write_text(
+            json.dumps({
+                "student_id": submission["student_id"],
+                "model": selected_model,
+                "usage": extract_response_usage(response),
+                "output_text": response.output_text,
+            }, indent=2),
+            encoding="utf-8",
+        )
+        print(f"Saved model response: {response_path}", flush=True)
         model_result = parse_json_response(response.output_text)
         validate_model_grading_response(model_result, response_schema_path)
         calculated = calculate_grading_result(
@@ -398,8 +530,10 @@ def grade_submissions(
         "estimated_cost": None,
         "pricing_assumptions": None,
         "grading_spec": spec_path.name,
+        "grading_spec_sha256": spec_fingerprint(spec),
         "submission_manifest": manifest_path.name,
         "submission_count": len(results),
+        "maximum_score": spec["project"]["total_points"],
         "results": results,
     }
 
@@ -413,5 +547,7 @@ def grade_submissions(
     csv_path = run_path / "preliminary_grading_report.csv"
     json_path.write_text(json_text, encoding="utf-8")
     csv_path.write_text(csv_text, encoding="utf-8", newline="")
+    (run_path / "grading_spec_snapshot.json").write_text(
+        json.dumps(spec, indent=2) + "\n", encoding="utf-8")
 
     return run_path, json_path, csv_path, run

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from project_grader.finalization import finalize_grading
+from ai_grader.finalization import finalize_grading
 
 
 class FinalizationTests(unittest.TestCase):
@@ -15,7 +15,14 @@ class FinalizationTests(unittest.TestCase):
             run_path = grader / "grading_runs" / "run_v003"
             run_path.mkdir(parents=True)
             spec = {
-                "project": {"title": "Demo Assignment"},
+                "schema_version": "1.0", "spec_version": "1", "status": "approved",
+                "project": {"project_id": "demo", "title": "Demo Assignment", "total_points": 10},
+                "sources": [{"source_id": "published", "source_type": "project_instructions", "path": "project/instructions.md"}],
+                "deliverables": [], "known_ambiguities": [],
+                "tasks": [{"task_id": "T1", "title": "Task One", "max_points": 10,
+                           "criteria": [{"criterion_id": "C1", "max_points": 10,
+                                         "description": "Work", "requirement_type": "technical_correctness",
+                                         "full_credit_condition": "Complete work."}]}],
             }
             (grader / "grading_spec_v001.json").write_text(
                 json.dumps(spec), encoding="utf-8"
@@ -59,7 +66,7 @@ class FinalizationTests(unittest.TestCase):
             self.assertEqual(row["actual_student_name"], "Avery Student")
             self.assertEqual(float(row["final_instructor_score"]), 9)
             text = txt_paths[0].read_text(encoding="utf-8")
-            self.assertEqual(text.count("Final Grade: 9/100"), 2)
+            self.assertEqual(text.count("Final Grade: 9/10"), 2)
             self.assertNotIn("agent", text.casefold())
 
 

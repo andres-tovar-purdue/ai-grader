@@ -1,9 +1,13 @@
 import json
+import math
+from collections import Counter
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from project_grader.rounding import (
+from ai_grader.spec_validation import validate_scoring_totals
+
+from ai_grader.rounding import (
     DEFAULT_ROUNDING_POLICY,
     apply_rounding,
 )
@@ -36,6 +40,7 @@ def calculate_grading_result(
     rounding_policy=DEFAULT_ROUNDING_POLICY,
 ):
     """Validate semantic references and calculate all totals locally."""
+    validate_scoring_totals(spec)
     if response["student_id"] != submission["student_id"]:
         raise ValueError("Grading response student_id does not match submission.")
 
@@ -60,6 +65,8 @@ def calculate_grading_result(
     raw_task_subtotals = []
     all_review_reasons = list(submission.get("review_flags", []))
     all_review_reasons.extend(response["review_reasons"])
+    if any(file.get("extension", "").lower() == ".pdf" for file in submission["files"]):
+        all_review_reasons.append("PDF contents were not inspected; verify the required PDF export manually.")
     any_review = bool(all_review_reasons) or response["review_required"]
     deduction_causes = {}
 
@@ -68,8 +75,12 @@ def calculate_grading_result(
         task_score = 0.0
         for criterion in task["criteria"]:
             result = dict(returned[criterion["criterion_id"]])
+            result["deductions"] = [dict(item) for item in result["deductions"]]
+            result["review_reasons"] = list(result["review_reasons"])
             score = float(result["agent_score"])
             maximum = float(criterion["max_points"])
+            if not math.isfinite(score) or score < 0:
+                raise ValueError(f"{criterion['criterion_id']} score must be finite and nonnegative.")
             if score > maximum:
                 raise ValueError(
                     f"{criterion['criterion_id']} score exceeds max_points."
@@ -77,6 +88,9 @@ def calculate_grading_result(
             deduction_total = sum(
                 float(item["points"]) for item in result["deductions"]
             )
+            approved_rules = {rule["rule_id"]: rule for rule in criterion.get("deduction_rules", [])}
+            rule_uses = Counter()
+            criterion_causes = set()
             for deduction in result["deductions"]:
                 deduction_type = deduction["deduction_type"]
                 if deduction_type in {
@@ -87,14 +101,43 @@ def calculate_grading_result(
                         f"{criterion['criterion_id']} uses prohibited deduction "
                         f"type {deduction_type}."
                     )
+                rule_id = deduction.get("rule_id")
+                if rule_id not in approved_rules:
+                    raise ValueError(f"{criterion['criterion_id']} deduction must cite an approved rule_id: {rule_id}.")
+                rule = approved_rules[rule_id]
+                points = float(deduction["points"])
+                if not math.isfinite(points) or points <= 0:
+                    raise ValueError(f"{rule_id} deduction must be finite and positive.")
+                if abs(points - float(rule["deduction_points"])) > 1e-6:
+                    raise ValueError(f"{rule_id} deduction points do not match the approved rule.")
+                rule_uses[rule_id] += 1
+                if rule_uses[rule_id] > rule.get("max_applications", 1):
+                    raise ValueError(f"{rule_id} deduction rule applied too many times.")
                 cause_id = deduction["cause_id"]
+                if rule.get("basis") == "filename":
+                    from ai_grader.submission_checks import spec_fingerprint
+                    checks = submission.get("deliverable_checks", {})
+                    if (checks.get("method") != "original_filenames_local_v1"
+                            or checks.get("spec_sha256") != spec_fingerprint(spec)):
+                        raise ValueError("Filename deductions require current original filename checks.")
+                    check = next((item for item in checks.get("checks", [])
+                                  if item["deliverable_id"] == rule["deliverable_id"]), None)
+                    if not check or check["status"] != "no_exact_match":
+                        raise ValueError("Filename deduction contradicts original filename checks.")
+                    # A missing/misnamed deliverable is one cause, even if the model invents two IDs.
+                    cause_id = "deliverable:" + rule["deliverable_id"]
+                    deduction["cause_id"] = cause_id
+                if cause_id in criterion_causes:
+                    raise ValueError(f"Repeated deduction cause within criterion: {cause_id}.")
+                criterion_causes.add(cause_id)
                 deduction_causes.setdefault(cause_id, []).append(
-                    (criterion["criterion_id"], deduction["independent_requirement"])
+                    (criterion["criterion_id"], rule.get("allow_shared_cause", False))
                 )
             if abs((score + deduction_total) - maximum) > 1e-6:
                 raise ValueError(
-                    f"{criterion['criterion_id']} score plus deductions "
-                    "does not equal max_points."
+                    f"{criterion['criterion_id']} score plus deductions does not equal max_points: score={score}, "
+                    f"deductions={deduction_total}, max_points={maximum}; "
+                    f"score + deductions={score + deduction_total}."
                 )
 
             for evidence in result["evidence"]:
@@ -110,6 +153,9 @@ def calculate_grading_result(
                             "Required evidence could not be verified."
                         ]
 
+            if result["confidence"] == "low" or result["evidence_state"] == "hidden_detail_unverifiable":
+                result["review_required"] = True
+                result["review_reasons"].append("Low-confidence or unverifiable evidence needs instructor review.")
             result["max_points"] = criterion["max_points"]
             result["deduction_total"] = round(deduction_total, 6)
             task_score += score

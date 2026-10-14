@@ -1,0 +1,1635 @@
+{
+  "schema_version": "1.0",
+  "spec_version": "0.2",
+  "status": "draft",
+  "project": {
+    "project_id": "mspe_49600_fa26_pr01",
+    "course": "MSPE 49600: Data Analytics for Motorsports",
+    "term": "Fall 2026",
+    "title": "Motorsports Data Preparation and Introduction to Modeling",
+    "total_points": 100,
+    "description": "Project 1 focuses on data preparation, grouped analysis, feature selection, second-order polynomial regression, visualization, and engineering interpretation using IMS Sector 3 setup-test data."
+  },
+  "sources": [
+    {
+      "source_id": "project_project_01_intro_to_modeling_pdf",
+      "source_type": "project_instructions",
+      "path": "project/Project_01_Intro_to_Modeling.pdf",
+      "description": "Original published assignment; primary authority for student requirements.",
+      "required_for_grading": true
+    },
+    {
+      "source_id": "project_project_instructions_md",
+      "source_type": "project_instructions",
+      "path": "project/project_instructions.md",
+      "description": "Draft instruction transcription used to clarify assignment structure; does not add requirements beyond the PDF.",
+      "required_for_grading": false
+    },
+    {
+      "source_id": "rubric_instructor_rubric_md",
+      "source_type": "rubric",
+      "path": "rubric/instructor_rubric_v002.md",
+      "description": "Corrected draft rubric. Published maxima are explicit; deduction amounts are proposed for instructor approval.",
+      "required_for_grading": false
+    },
+    {
+      "source_id": "reference_reference_solution_md",
+      "source_type": "reference_solution",
+      "path": "reference/reference_solution.md",
+      "description": "Reference solution illustrating one valid approach; not the only acceptable solution.",
+      "required_for_grading": false
+    },
+    {
+      "source_id": "datasets_ims_setup_raw_csv",
+      "source_type": "dataset",
+      "path": "datasets/ims_setup_raw.csv",
+      "description": "Raw dataset for the project.",
+      "required_for_grading": false
+    }
+  ],
+  "deliverables": [
+    {
+      "deliverable_id": "notebook_ipynb",
+      "description": "Completed Jupyter notebook submission.",
+      "required": true,
+      "file_patterns": [
+        "username_pr01_notebook.ipynb"
+      ],
+      "file_types": [
+        "ipynb"
+      ],
+      "applies_to_tasks": [
+        "task1",
+        "task2",
+        "task3",
+        "task4",
+        "task5",
+        "task6"
+      ],
+      "missing_rule": "follow_criterion_rules",
+      "notes": "Original filename compliance is checked locally before anonymization. A missing/misnamed standalone file is scored once in task6."
+    },
+    {
+      "deliverable_id": "notebook_pdf",
+      "description": "Notebook exported as PDF.",
+      "required": true,
+      "file_patterns": [
+        "username_pr01_notebook.pdf"
+      ],
+      "file_types": [
+        "pdf"
+      ],
+      "applies_to_tasks": [
+        "task1",
+        "task2",
+        "task3",
+        "task4",
+        "task5",
+        "task6"
+      ],
+      "missing_rule": "follow_criterion_rules",
+      "notes": "Original filename compliance is checked locally before anonymization. A missing/misnamed standalone file is scored once in task6."
+    },
+    {
+      "deliverable_id": "notebook_py",
+      "description": "Notebook exported as a Python script containing the same code as the submitted notebook.",
+      "required": true,
+      "file_patterns": [
+        "username_pr01_notebook.py"
+      ],
+      "file_types": [
+        "py"
+      ],
+      "applies_to_tasks": [
+        "task1",
+        "task2",
+        "task3",
+        "task4",
+        "task5",
+        "task6"
+      ],
+      "missing_rule": "follow_criterion_rules",
+      "notes": "Original filename compliance is checked locally before anonymization. A missing/misnamed standalone file is scored once in task6."
+    },
+    {
+      "deliverable_id": "analysis_csv",
+      "description": "Final analysis dataset saved from Task I.",
+      "required": true,
+      "file_patterns": [
+        "username_pr01_analysis.csv"
+      ],
+      "file_types": [
+        "csv"
+      ],
+      "applies_to_tasks": [
+        "task1",
+        "task6"
+      ],
+      "missing_rule": "follow_criterion_rules",
+      "notes": "Original filename compliance is checked locally before anonymization. A missing/misnamed standalone file is scored once in task6."
+    },
+    {
+      "deliverable_id": "grouped_csv",
+      "description": "Grouped configuration summary saved from Task II.",
+      "required": true,
+      "file_patterns": [
+        "username_pr01_grouped.csv"
+      ],
+      "file_types": [
+        "csv"
+      ],
+      "applies_to_tasks": [
+        "task2",
+        "task6"
+      ],
+      "missing_rule": "follow_criterion_rules",
+      "notes": "Original filename compliance is checked locally before anonymization. A missing/misnamed standalone file is scored once in task6."
+    },
+    {
+      "deliverable_id": "model_csv",
+      "description": "Model DataFrame saved from Task IV.",
+      "required": true,
+      "file_patterns": [
+        "username_pr01_model.csv"
+      ],
+      "file_types": [
+        "csv"
+      ],
+      "applies_to_tasks": [
+        "task4",
+        "task6"
+      ],
+      "missing_rule": "follow_criterion_rules",
+      "notes": "Original filename compliance is checked locally before anonymization. A missing/misnamed standalone file is scored once in task6."
+    },
+    {
+      "deliverable_id": "correlation_png",
+      "description": "Correlation heatmap figure.",
+      "required": true,
+      "file_patterns": [
+        "username_pr01_correlation.png"
+      ],
+      "file_types": [
+        "png"
+      ],
+      "applies_to_tasks": [
+        "task3",
+        "task6"
+      ],
+      "missing_rule": "follow_criterion_rules",
+      "notes": "Original filename compliance is checked locally before anonymization. A missing/misnamed standalone file is scored once in task6."
+    },
+    {
+      "deliverable_id": "pairplot_png",
+      "description": "Pairplot figure.",
+      "required": true,
+      "file_patterns": [
+        "username_pr01_pairplot.png"
+      ],
+      "file_types": [
+        "png"
+      ],
+      "applies_to_tasks": [
+        "task3",
+        "task6"
+      ],
+      "missing_rule": "follow_criterion_rules",
+      "notes": "Original filename compliance is checked locally before anonymization. A missing/misnamed standalone file is scored once in task6."
+    },
+    {
+      "deliverable_id": "surface_png",
+      "description": "3D response-surface figure.",
+      "required": true,
+      "file_patterns": [
+        "username_pr01_surface.png"
+      ],
+      "file_types": [
+        "png"
+      ],
+      "applies_to_tasks": [
+        "task5",
+        "task6"
+      ],
+      "missing_rule": "follow_criterion_rules",
+      "notes": "Original filename compliance is checked locally before anonymization. A missing/misnamed standalone file is scored once in task6."
+    },
+    {
+      "deliverable_id": "contour_png",
+      "description": "2D contour figure.",
+      "required": true,
+      "file_patterns": [
+        "username_pr01_contour.png"
+      ],
+      "file_types": [
+        "png"
+      ],
+      "applies_to_tasks": [
+        "task5",
+        "task6"
+      ],
+      "missing_rule": "follow_criterion_rules",
+      "notes": "Original filename compliance is checked locally before anonymization. A missing/misnamed standalone file is scored once in task6."
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "task1",
+      "title": "Data Inspection and Preparation",
+      "max_points": 25,
+      "source_refs": [
+        "project_project_01_intro_to_modeling_pdf"
+      ],
+      "criteria": [
+        {
+          "criterion_id": "t1_c1",
+          "description": "Read ims_setup_raw.csv into df_raw and display the required raw-data inspection outputs.",
+          "requirement_type": "technical_correctness",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "source_code",
+              "description": "Code that loads the raw CSV into df_raw.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Task I, step 1",
+              "verification": "inspect"
+            },
+            {
+              "evidence_type": "execution_result",
+              "description": "Visible outputs for head(), shape, columns, describe(), and isna().sum().",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task I, step 2",
+              "verification": "manual_review"
+            },
+            {
+              "evidence_type": "written_response",
+              "description": "Markdown note describing initial data-quality problems observed.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task I, step 3",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "df_raw is created from ims_setup_raw.csv and the notebook visibly shows head, shape, columns, describe, and missing-value counts, with a brief and data-supported observation of initial quality issues.",
+          "deduction_rules": [
+            {
+              "rule_id": "t1_c1_miss_display",
+              "condition": "One required inspection output is missing or not visible.",
+              "deduction_points": 1.5,
+              "feedback_template": "Include all required raw-data inspection outputs and keep them visible in the submitted notebook.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t1_c1_wrong_name",
+              "condition": "Raw data is loaded but not into df_raw, or the file is misread in a way that still allows later work.",
+              "deduction_points": 1,
+              "feedback_template": "Use the required DataFrame name df_raw for consistency with the assignment.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t1_c1_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Outputs not visible in submitted notebook.",
+            "Markdown invents issues not supported by the raw data."
+          ],
+          "feedback_guidance": "Reward correct inspection flow even if the discussion is brief; require evidence of actual data awareness. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t1_c2",
+          "description": "Create df_clean, remove duplicates, coerce required columns to numeric, display missing values after conversion, and drop rows with missing required values. The five required numerical columns are lap, rear_wing_angle_deg, rear_ride_height_mm, tire_pressure_psi, sector_3_time_s.",
+          "requirement_type": "data_handling",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "source_code",
+              "description": "Code that selects the required columns, removes duplicates with drop_duplicates().copy(), converts with pd.to_numeric(errors='coerce'), and drops missing rows.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Task I, steps 4-8",
+              "verification": "inspect"
+            },
+            {
+              "evidence_type": "execution_result",
+              "description": "Visible missing-value counts after numeric conversion.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task I, step 7",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "df_clean contains only the required columns, duplicates are removed, numeric conversion uses errors='coerce', missing values are shown after conversion, and rows with missing required values are dropped without removing rows solely for unusual Sector 3 time. Convert all five listed columns, including lap, to numeric; the assignment expressly requires this.",
+          "deduction_rules": [
+            {
+              "rule_id": "t1_c2_missing_step",
+              "condition": "One cleaning step is omitted but the analysis path remains clearly consistent.",
+              "deduction_points": 1.5,
+              "feedback_template": "Complete all required cleaning steps in the instructed order, including visible missing-value reporting.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t1_c2_overremove",
+              "condition": "Rows appear to have been removed only because Sector 3 time looked unusual.",
+              "deduction_points": 2,
+              "feedback_template": "Do not delete rows solely because they are unusual in Sector 3 time; the assignment requires reviewing outliers separately.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t1_c2_not_numeric",
+              "condition": "Invalid numeric strings are left unconverted or handled inconsistently with the instructions.",
+              "deduction_points": 2,
+              "feedback_template": "Use pd.to_numeric(..., errors='coerce') so invalid entries become missing and can be handled consistently.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t1_c2_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Nonrequired columns included in df_clean.",
+            "Aggressive row filtering before outlier review."
+          ],
+          "feedback_guidance": "Minor naming or formatting differences may be acceptable if the cleaning logic is correct. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum.",
+          "acceptable_alternatives": [
+            "Numeric conversion of lap is required and must never be penalized.",
+            "Equivalent syntax is acceptable when the required cleaning behavior is preserved."
+          ]
+        },
+        {
+          "criterion_id": "t1_c3",
+          "description": "Compute median and MAD for sector_3_time_s, create modified_z_sector_time and potential_outlier, display flagged observations, and explain every flagged row's retain/exclude decision.",
+          "requirement_type": "numerical_result",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "numerical_output",
+              "description": "Median sector time, MAD, modified z-score values, and Boolean outlier flags.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task I, steps 9-13",
+              "verification": "calculate"
+            },
+            {
+              "evidence_type": "execution_result",
+              "description": "Visible table of all observations flagged as potential outliers.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task I, step 13",
+              "verification": "manual_review"
+            },
+            {
+              "evidence_type": "written_response",
+              "description": "Markdown explanation addressing each flagged observation individually.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task I, step 15",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "Median and MAD are calculated on the cleaned sector_3_time_s values, modified_z_sector_time matches the stated formula, potential_outlier flags |z*| > 3.5, flagged rows are shown, and each flagged row has a documented retain/exclude decision.",
+          "deduction_rules": [
+            {
+              "rule_id": "t1_c3_formula_error",
+              "condition": "The modified z-score formula or threshold is implemented incorrectly but the intent is clear.",
+              "deduction_points": 2,
+              "feedback_template": "Use the assignment's modified z-score formula and the |z*| > 3.5 threshold.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t1_c3_no_explanation",
+              "condition": "Flagged rows are shown but the retain/exclude rationale is missing or not specific to each flagged observation.",
+              "deduction_points": 2,
+              "feedback_template": "Explain the decision for every flagged observation, not just the general approach.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t1_c3_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Using a different threshold without justification.",
+            "Treating a statistical outlier as automatically erroneous."
+          ],
+          "feedback_guidance": "Statistical outliers may be retained if the student gives a defensible engineering/data-quality reason. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t1_c4",
+          "description": "Create df_analysis from approved observations, display head(), isna().sum(), and describe(), and export the analysis CSV with index=False.",
+          "requirement_type": "deliverable",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "source_code",
+              "description": "Code that creates df_analysis from approved observations and saves username_pr01_analysis.csv with index=False.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Task I, steps 16-18",
+              "verification": "inspect"
+            },
+            {
+              "evidence_type": "execution_result",
+              "description": "Visible first five rows, missing-value counts, and descriptive statistics for df_analysis.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task I, step 17",
+              "verification": "manual_review"
+            },
+            {
+              "evidence_type": "file_presence",
+              "description": "Saved analysis CSV file.",
+              "required": true,
+              "artifact_patterns": [
+                "username_pr01_analysis.csv"
+              ],
+              "location_hint": "Task I, step 18",
+              "verification": "presence_only"
+            }
+          ],
+          "full_credit_condition": "df_analysis contains the approved observations; head(), isna().sum(), and describe() outputs are visible, and the CSV contains the approved rows with no saved index. File packaging and exact original filenames are scored in task6 only.",
+          "deduction_rules": [
+            {
+              "rule_id": "t1_c4_wrong_csv",
+              "condition": "The exported analysis CSV has incorrect columns, includes a saved index, or does not contain the documented approved rows. Do not use this rule solely for a missing or misnamed file.",
+              "deduction_points": 2,
+              "feedback_template": "Save the final analysis DataFrame using the required filename and include the approved rows only.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t1_c4_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "df_analysis appears inconsistent with the documented retain/exclude decisions."
+          ],
+          "feedback_guidance": "Evaluate analysis content and verification here. Score the separate engineering reflection in t1_c5 and file packaging in t6_c1. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t1_c5",
+          "description": "Engineering reflection: summarize principal data-quality problems, cleaning decisions, and their possible effect on regression.",
+          "requirement_type": "engineering_interpretation",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "written_response",
+              "description": "Task I engineering reflection in Markdown, grounded in the actual cleaning and outlier decisions.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Assignment page 3, Engineering reflection (step 19)",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "The reflection addresses observed data-quality problems, the documented cleaning decisions, and their possible regression impact. Concise but complete discussion earns full credit.",
+          "deduction_rules": [
+            {
+              "rule_id": "t1_c5_missing_theme",
+              "condition": "One of the three required reflection themes is entirely omitted. Use one distinct cause per omitted theme, not per sentence.",
+              "deduction_points": 1,
+              "max_applications": 3,
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t1_c5_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "feedback_guidance": "Do not demand a word count, a particular sentence structure, or extra topics. If the only possible evidence is an uninspected PDF, require review rather than deduct for the extraction limitation. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        }
+      ],
+      "review_triggers": [
+        "Task I outputs not visible.",
+        "Outlier decisions are undocumented or inconsistent with the displayed flagged rows."
+      ],
+      "notes": "Task I grading should follow the documented cleaning path and verify that the final analysis set matches the student's stated outlier decisions."
+    },
+    {
+      "task_id": "task2",
+      "title": "Grouped Analysis and Best Tested Configuration",
+      "max_points": 20,
+      "source_refs": [
+        "project_project_01_intro_to_modeling_pdf"
+      ],
+      "criteria": [
+        {
+          "criterion_id": "t2_c1",
+          "description": "Group df_analysis by the three setup features and compute mean Sector 3 time, sample standard deviation, and valid-lap count.",
+          "requirement_type": "technical_correctness",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "source_code",
+              "description": "Grouping code using rear_wing_angle_deg, rear_ride_height_mm, and tire_pressure_psi.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Task II, steps 20-21",
+              "verification": "inspect"
+            },
+            {
+              "evidence_type": "numerical_output",
+              "description": "Computed grouped statistics.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task II, step 21",
+              "verification": "calculate"
+            }
+          ],
+          "full_credit_condition": "The grouped results use the three required keys and compute the mean, sample standard deviation, and count of valid laps for Sector 3 time.",
+          "deduction_rules": [
+            {
+              "rule_id": "t2_c1_wrong_groupby",
+              "condition": "Grouping keys or statistics differ from the assignment, but the results are otherwise coherent.",
+              "deduction_points": 2,
+              "feedback_template": "Group by the three specified setup variables and compute the three requested statistics.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t2_c1_std_wrong",
+              "condition": "Population standard deviation is used without note instead of the requested sample standard deviation.",
+              "deduction_points": 1,
+              "feedback_template": "Use the sample standard deviation for the grouped Sector 3 time.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t2_c1_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Grouping on the wrong columns.",
+            "Using raw laps instead of configuration-level groups."
+          ],
+          "feedback_guidance": "Accept equivalent aggregation syntax if the output matches the required statistics. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t2_c2",
+          "description": "Store grouped results in df_grouped with the specified column names, display it, report the total number of tested configurations, and save username_pr01_grouped.csv. Required aggregated column names: mean_sector_3_time_s, std_sector_3_time_s, and valid_laps.",
+          "requirement_type": "deliverable",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "source_code",
+              "description": "Code that assigns the grouped table to df_grouped and saves the CSV with index=False.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Task II, steps 22-24",
+              "verification": "inspect"
+            },
+            {
+              "evidence_type": "execution_result",
+              "description": "Visible df_grouped display and configuration count.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task II, step 23",
+              "verification": "manual_review"
+            },
+            {
+              "evidence_type": "file_presence",
+              "description": "Saved grouped CSV file.",
+              "required": true,
+              "artifact_patterns": [
+                "username_pr01_grouped.csv"
+              ],
+              "location_hint": "Task II, step 24",
+              "verification": "presence_only"
+            }
+          ],
+          "full_credit_condition": "df_grouped contains the three setup-feature columns plus mean_sector_3_time_s, std_sector_3_time_s, and valid_laps. Display df_grouped, report its configuration count, and export its correct contents with index=False. Score file packaging in task6 only.",
+          "deduction_rules": [
+            {
+              "rule_id": "t2_c2_name_mismatch",
+              "condition": "The grouped table exists but one or more required column names or the DataFrame name are wrong.",
+              "deduction_points": 1.5,
+              "feedback_template": "Use the specified DataFrame and column names so the downstream tasks remain consistent.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t2_c2_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Configuration count not reported.",
+            "Grouped CSV contents do not match the displayed table."
+          ],
+          "feedback_guidance": "Do not require a unique row order as long as the grouped statistics are correct and usable. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum.",
+          "acceptable_alternatives": [
+            "Sorted and unsorted grouped rows are both acceptable if the statistics and selected minimum remain correct.",
+            "std_sector_3_time_s is the exact published standard-deviation column name."
+          ]
+        },
+        {
+          "criterion_id": "t2_c3",
+          "description": "Use np.min() and np.argmin() to identify and display the best tested configuration from df_grouped.",
+          "requirement_type": "numerical_result",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "numerical_output",
+              "description": "Lowest mean Sector 3 time and the corresponding grouped row.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task II, steps 25-26",
+              "verification": "compare"
+            }
+          ],
+          "full_credit_condition": "The lowest mean Sector 3 time is computed with np.min(), its position is found with np.argmin(), and the corresponding row from df_grouped is displayed.",
+          "deduction_rules": [
+            {
+              "rule_id": "t2_c3_wrong_source",
+              "condition": "The minimum is taken from ungrouped lap data or another incorrect source.",
+              "deduction_points": 3,
+              "feedback_template": "Identify the best tested configuration from the grouped configuration means, not from raw lap times.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t2_c3_wrong_row",
+              "condition": "The correct minimum is identified but the displayed row does not correspond to that minimum.",
+              "deduction_points": 2,
+              "feedback_template": "Use np.argmin() to retrieve the matching grouped row.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t2_c3_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Selecting from raw, ungrouped observations instead of grouped means."
+          ],
+          "feedback_guidance": "Equivalent selection logic is acceptable if it clearly returns the same grouped row. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t2_c4",
+          "description": "Report the best tested configuration in Markdown with rear wing angle, rear ride height, tire pressure, mean Sector 3 time, standard deviation, and valid-lap count.",
+          "requirement_type": "documentation",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "written_response",
+              "description": "Markdown report of the configuration and grouped metrics.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task II, step 27",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "The Markdown report includes all six requested values and matches the displayed best-tested configuration row.",
+          "deduction_rules": [
+            {
+              "rule_id": "t2_c4_missing_value",
+              "condition": "One requested metric is omitted or mislabeled in the report.",
+              "deduction_points": 1,
+              "feedback_template": "Report all requested configuration values and summary statistics.",
+              "max_applications": 6,
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t2_c4_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Reported values do not match the displayed best-tested row."
+          ],
+          "feedback_guidance": "Precision should match the displayed grouped statistics rather than invented rounding. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        }
+      ],
+      "review_triggers": [
+        "Best-tested configuration appears to come from an incorrect grouping or row index."
+      ],
+      "notes": "Task II should be graded against the student\u2019s df_analysis-derived grouped table and not against raw data directly."
+    },
+    {
+      "task_id": "task3",
+      "title": "Feature Selection",
+      "max_points": 15,
+      "source_refs": [
+        "project_project_01_intro_to_modeling_pdf"
+      ],
+      "criteria": [
+        {
+          "criterion_id": "t3_c1",
+          "description": "Create df_correlation and compute/display the Pearson correlation matrix in correlation_matrix.",
+          "requirement_type": "technical_correctness",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "source_code",
+              "description": "Code building df_correlation from the three candidate features and mean_sector_3_time_s, and storing the Pearson correlation matrix in correlation_matrix.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Task III, steps 28-29",
+              "verification": "inspect"
+            },
+            {
+              "evidence_type": "execution_result",
+              "description": "Visible correlation matrix display.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task III, step 29",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "df_correlation includes the three candidate features and mean_sector_3_time_s, and correlation_matrix contains the displayed Pearson correlations.",
+          "deduction_rules": [
+            {
+              "rule_id": "t3_c1_missing_column",
+              "condition": "A required column is omitted or the target variable is wrong.",
+              "deduction_points": 2,
+              "feedback_template": "Use the three candidate features and mean_sector_3_time_s exactly as specified.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t3_c1_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Using a different correlation type without note.",
+            "Correlation matrix not visible in submission."
+          ],
+          "feedback_guidance": "Small formatting differences in matrix display are acceptable. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t3_c2",
+          "description": "Create and save a labeled correlation heatmap and a pairplot for the candidate features and mean Sector 3 time.",
+          "requirement_type": "visualization",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "plot",
+              "description": "Labeled correlation heatmap with scale from -1 to 1 and visible values.",
+              "required": true,
+              "artifact_patterns": [
+                "username_pr01_correlation.png"
+              ],
+              "location_hint": "Task III, step 30",
+              "verification": "manual_review"
+            },
+            {
+              "evidence_type": "plot",
+              "description": "Pairplot showing relationships among the three candidate features and mean Sector 3 time.",
+              "required": true,
+              "artifact_patterns": [
+                "username_pr01_pairplot.png"
+              ],
+              "location_hint": "Task III, step 31",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "Both figures are created, labeled, and saved under the required filenames, with the heatmap showing a -1 to 1 scale and correlation values on the cells. A correct plot visible in notebook saved outputs demonstrates technical visualization; separate PNG packaging and filenames are scored in task6 only.",
+          "deduction_rules": [
+            {
+              "rule_id": "t3_c2_missing_plot",
+              "condition": "One required visualization is not demonstrated anywhere in the supplied readable evidence, or shows the wrong variables. Do not apply merely because the standalone PNG is missing or misnamed when the correct plot is visible in notebook saved outputs. If the plot might be in an uninspected PDF, require review instead.",
+              "deduction_points": 2.5,
+              "feedback_template": "Create and save both required plots with the requested content and filenames.",
+              "max_applications": 2,
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t3_c2_heatmap_label",
+              "condition": "The heatmap lacks the required labels, values, or scale range.",
+              "deduction_points": 1,
+              "feedback_template": "Include the correlation values and a -1 to 1 color scale on the heatmap.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t3_c2_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Plot files missing.",
+            "Plots do not correspond to the specified variables."
+          ],
+          "feedback_guidance": "Do not require a specific plotting library as long as the resulting figures are correct. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t3_c3",
+          "description": "Select two of the three candidate features and justify the selection using correlations, pairplot structure, and engineering reasoning.",
+          "requirement_type": "engineering_interpretation",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "source_code",
+              "description": "selected_features list containing two candidate feature names.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Task III, step 32",
+              "verification": "inspect"
+            },
+            {
+              "evidence_type": "written_response",
+              "description": "Markdown justification referring to correlation coefficients, pairplot patterns/curvature, and engineering reasoning.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task III, step 33",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "selected_features contains exactly two candidate feature names and the justification uses all three requested lines of evidence without relying on correlation alone.",
+          "deduction_rules": [
+            {
+              "rule_id": "t3_c3_no_engineering",
+              "condition": "The selection is justified only with correlations and omits engineering reasoning or curvature discussion.",
+              "deduction_points": 2,
+              "feedback_template": "Justify the feature choice with data patterns and engineering reasoning, not correlations alone.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t3_c3_bad_count",
+              "condition": "selected_features does not contain exactly two features.",
+              "deduction_points": 2,
+              "feedback_template": "Select exactly two candidate features for the regression analysis.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t3_c3_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "acceptable_alternatives": [
+            "Any technically defensible pair of the three candidate features is acceptable if the justification is supported by the student's plots and engineering reasoning."
+          ],
+          "review_triggers": [
+            "Feature choice appears unsupported by the plotted data patterns.",
+            "Student claims a unique mandatory pair without assignment support."
+          ],
+          "feedback_guidance": "Do not force a single feature pair unless the student's own evidence is inconsistent or unsupported. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        }
+      ],
+      "review_triggers": [
+        "selected_features is missing or not a two-item list."
+      ],
+      "notes": "Task III should prioritize whether the student's chosen pair is defensible, not whether it matches a single preferred answer."
+    },
+    {
+      "task_id": "task4",
+      "title": "Regression Modeling",
+      "max_points": 15,
+      "source_refs": [
+        "project_project_01_intro_to_modeling_pdf"
+      ],
+      "criteria": [
+        {
+          "criterion_id": "t4_c1",
+          "description": "Create df_model with the selected features and mean_sector_3_time_s, save username_pr01_model.csv, define x1, x2, and y, and identify their physical meaning.",
+          "requirement_type": "technical_correctness",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "source_code",
+              "description": "Code creating df_model, saving the model CSV, and defining x1, x2, y.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Task IV, steps 34-37",
+              "verification": "inspect"
+            },
+            {
+              "evidence_type": "execution_result",
+              "description": "Visible first five rows of df_model.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task IV, step 34",
+              "verification": "manual_review"
+            },
+            {
+              "evidence_type": "file_presence",
+              "description": "Saved model CSV file.",
+              "required": true,
+              "artifact_patterns": [
+                "username_pr01_model.csv"
+              ],
+              "location_hint": "Task IV, step 35",
+              "verification": "presence_only"
+            },
+            {
+              "evidence_type": "written_response",
+              "description": "Markdown statement of the physical variable represented by x1 and x2.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task IV, step 37",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "df_model contains the two selected features and mean_sector_3_time_s, the CSV is saved correctly, x1/x2/y are defined consistently with selected_features, and the markdown maps x1 and x2 to the correct physical variables. Missing/misnamed files are scored in task6 only.",
+          "deduction_rules": [
+            {
+              "rule_id": "t4_c1_var_swap",
+              "condition": "x1 and x2 are swapped relative to the selected_features order or the markdown mapping is inconsistent.",
+              "deduction_points": 2,
+              "feedback_template": "Keep x1 and x2 consistent with the selected_features order and your written variable mapping.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t4_c1_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "x1/x2 definitions do not match the selected feature order."
+          ],
+          "feedback_guidance": "Minor naming or display differences are acceptable if the mapping is unambiguous. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t4_c2",
+          "description": "Construct Xdm with the required six-term second-order polynomial basis, display its shape, explain whether the system is overdetermined, and compute/display b with the Moore\u2013Penrose pseudoinverse.",
+          "requirement_type": "required_method",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "source_code",
+              "description": "Code constructing the design matrix and computing b = np.linalg.pinv(Xdm) @ y.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Task IV, steps 38-42",
+              "verification": "inspect"
+            },
+            {
+              "evidence_type": "execution_result",
+              "description": "Visible shape of Xdm, coefficients, and fitted equation.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task IV, steps 39 and 42",
+              "verification": "manual_review"
+            },
+            {
+              "evidence_type": "written_response",
+              "description": "Markdown explaining number of equations, number of unknown coefficients, and whether the system is overdetermined.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task IV, step 40",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "Xdm contains columns for 1, x1, x2, x1^2, x2^2, and x1x2; the shape is shown; the overdetermined explanation is correct; and b is computed with np.linalg.pinv(Xdm) @ y.",
+          "deduction_rules": [
+            {
+              "rule_id": "t4_c2_wrong_basis",
+              "condition": "One or more design-matrix terms are missing or replaced with a different model form.",
+              "deduction_points": 3,
+              "feedback_template": "Use the six-term second-order polynomial basis specified in the assignment.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t4_c2_no_pinv",
+              "condition": "The coefficients are obtained without the Moore\u2013Penrose pseudoinverse or with an incompatible solving method.",
+              "deduction_points": 2,
+              "feedback_template": "Compute the coefficients using b = np.linalg.pinv(Xdm) @ y.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t4_c2_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "System size explanation contradicts the shown matrix shape."
+          ],
+          "feedback_guidance": "Equivalent array construction is acceptable if the resulting Xdm matches the required basis exactly. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t4_c3",
+          "description": "Define predict_sector_time(x1, x2) and test it using one configuration from df_model.",
+          "requirement_type": "required_method",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "source_code",
+              "description": "Function definition and test call.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Task IV, steps 43-44",
+              "verification": "inspect"
+            },
+            {
+              "evidence_type": "execution_result",
+              "description": "Displayed test prediction value.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task IV, step 44",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "The function accepts x1 and x2 as inputs, returns the predicted mean Sector 3 time from the fitted model, and is tested on at least one df_model configuration with the prediction displayed.",
+          "deduction_rules": [
+            {
+              "rule_id": "t4_c3_wrong_func",
+              "condition": "The function is hard-coded, ignores its inputs, or does not return the model prediction.",
+              "deduction_points": 3,
+              "feedback_template": "Define a reusable prediction function that uses the fitted coefficients and the input values.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t4_c3_no_test",
+              "condition": "The function exists but is not tested on a configuration from df_model.",
+              "deduction_points": 1.5,
+              "feedback_template": "Test the prediction function using one configuration from df_model and show the result.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t4_c3_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Function output does not match the fitted model equations."
+          ],
+          "feedback_guidance": "Accept any clearly correct function implementation that uses the fitted coefficients. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        }
+      ],
+      "review_triggers": [
+        "Design matrix or prediction function is inconsistent with selected_features order."
+      ],
+      "notes": "Task IV evaluation should follow the student's selected feature order and fitted coefficients exactly as presented."
+    },
+    {
+      "task_id": "task5",
+      "title": "Visualization and Engineering Interpretation",
+      "max_points": 20,
+      "source_refs": [
+        "project_project_01_intro_to_modeling_pdf"
+      ],
+      "criteria": [
+        {
+          "criterion_id": "t5_c1",
+          "description": "Prepare the prediction grid using np.linspace, np.meshgrid, and predict_sector_time across the tested ranges.",
+          "requirement_type": "technical_correctness",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "source_code",
+              "description": "Code creating x1_plot, x2_plot, X1_grid, X2_grid, and T_hat_grid.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Task V, steps 45-47",
+              "verification": "inspect"
+            },
+            {
+              "evidence_type": "execution_result",
+              "description": "Visible grid/prediction outputs if shown.",
+              "required": false,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task V, steps 45-47",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "x1_plot and x2_plot each contain 50 evenly spaced values across the tested ranges, X1_grid and X2_grid are formed with np.meshgrid, and T_hat_grid is computed from predict_sector_time over the full grid.",
+          "deduction_rules": [
+            {
+              "rule_id": "t5_c1_wrong_range",
+              "condition": "The plotting grid does not span the tested min/max range of the selected features.",
+              "deduction_points": 2,
+              "feedback_template": "Use the tested feature ranges when building the prediction grid.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t5_c1_wrong_n",
+              "condition": "The linspace resolution is not 50 points per axis without a justified alternative.",
+              "deduction_points": 1,
+              "feedback_template": "Use 50 evenly spaced values on each axis as specified.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t5_c1_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Grid is computed outside the tested range without explanation."
+          ],
+          "feedback_guidance": "Vectorized or loop-based computation is acceptable if it produces the correct grid. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t5_c2",
+          "description": "Identify the best predicted grid point using np.min() and np.argmin(), retrieve its feature values from the flattened grids, and display the result.",
+          "requirement_type": "numerical_result",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "numerical_output",
+              "description": "Lowest predicted Sector 3 time and corresponding feature values from the grid.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task V, steps 48-49",
+              "verification": "compare"
+            },
+            {
+              "evidence_type": "written_response",
+              "description": "Use of the term best predicted grid point rather than confirmed optimum.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task V, step 52",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "The minimum predicted value and its index are found with np.min() and np.argmin(), the corresponding flattened-grid feature values are retrieved, and the result is reported as the best predicted grid point. No extra disclaimer is required if the result is correctly named and no confirmed/global optimality claim is made.",
+          "deduction_rules": [
+            {
+              "rule_id": "t5_c2_wrong_index",
+              "condition": "The displayed grid point does not correspond to the minimum of T_hat_grid.",
+              "deduction_points": 2,
+              "feedback_template": "Use the minimum index from T_hat_grid to retrieve the matching feature values.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t5_c2_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "The reported point is inconsistent with the displayed prediction grid."
+          ],
+          "feedback_guidance": "This is a grid-based best prediction and depends on the selected plotting resolution. Any incorrect optimality claim is scored once in t5_c4, not again here. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t5_c3",
+          "description": "Create and save the 3D surface plot and 2D filled contour plot with the required annotations and legends.",
+          "requirement_type": "visualization",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "plot",
+              "description": "3D response-surface plot with grouped test data scatter, fitted surface, and best predicted grid point saved as username_pr01_surface.png.",
+              "required": true,
+              "artifact_patterns": [
+                "username_pr01_surface.png"
+              ],
+              "location_hint": "Task V, step 50",
+              "verification": "manual_review"
+            },
+            {
+              "evidence_type": "plot",
+              "description": "2D contour plot with tested configurations, best predicted grid point, labels, legend, and color bar saved as username_pr01_contour.png.",
+              "required": true,
+              "artifact_patterns": [
+                "username_pr01_contour.png"
+              ],
+              "location_hint": "Task V, step 51",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "Both plots are present, readable, and include the required scatter/contour elements, labels with feature names and units, titles, legends, and the specified color-bar label on the contour plot. Judge notebook embedded plots as technical evidence; standalone PNG compliance is scored in task6 only.",
+          "deduction_rules": [
+            {
+              "rule_id": "t5_c3_missing_file",
+              "condition": "One of the two required visualizations is not demonstrated anywhere in the supplied readable evidence. Do not apply for a missing or misnamed standalone PNG when the correct plot is visible in notebook saved outputs; PDF-only evidence needs review.",
+              "deduction_points": 2.5,
+              "feedback_template": "Demonstrate both required visualizations with the prescribed model and data elements.",
+              "max_applications": 2,
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t5_c3_label_issue",
+              "condition": "Axis labels, title, legend, or the contour color-bar label are incomplete or incorrect. File naming is not an axis, title, legend, or color-bar error.",
+              "deduction_points": 1,
+              "feedback_template": "Include the required labels and the exact color-bar label on the contour plot.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t5_c3_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Surface or contour plot does not include the fitted model output.",
+            "Color-bar label differs from the required text."
+          ],
+          "feedback_guidance": "Minor style differences are acceptable if the plots clearly communicate the required information. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        },
+        {
+          "criterion_id": "t5_c4",
+          "description": "Interpret the response surface and best predicted grid point in Markdown, including feature effects, curvature/interaction, agreement with the best tested configuration, boundary location, and limitations of excluding the third feature.",
+          "requirement_type": "engineering_interpretation",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "written_response",
+              "description": "Markdown interpretation of the fitted response surface and limitations.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.pdf"
+              ],
+              "location_hint": "Task V, step 52",
+              "verification": "manual_review"
+            }
+          ],
+          "full_credit_condition": "The Markdown discussion addresses all required interpretation points and explicitly refers to the result as the best predicted grid point, not a confirmed optimum. Correctly calling it the best predicted grid point is sufficient; do not deduct merely for lacking an additional disclaimer.",
+          "deduction_rules": [
+            {
+              "rule_id": "t5_c4_missing_point",
+              "condition": "One required discussion point is omitted.",
+              "deduction_points": 1,
+              "feedback_template": "Address how each feature affects the prediction, any curvature/interaction, the comparison to the best tested configuration, boundary vs interior location, and the limits of omitting the third feature.",
+              "max_applications": 5,
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t5_c4_wrong_claim",
+              "condition": "Cite a specific statement that claims confirmed or global optimality. Correct best-predicted-grid-point wording without an additional disclaimer does not trigger this rule.",
+              "deduction_points": 1.5,
+              "feedback_template": "Describe the result as the best predicted grid point, which depends on the fitted model and grid resolution.",
+              "basis": "technical"
+            },
+            {
+              "rule_id": "t5_c4_not_demonstrated",
+              "condition": "The entire substantive criterion is absent from all supplied readable evidence. Do not use for partial shortcomings, merely missing standalone exports, or unsupported/uninspected evidence. Apply this full-criterion deduction alone.",
+              "deduction_points": 5,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Interpretation contradicts the shown plots or the reported best predicted grid point."
+          ],
+          "feedback_guidance": "Reward concise but well-grounded interpretation that matches the fitted model and grid resolution. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        }
+      ],
+      "review_triggers": [
+        "Prediction grid, plots, or interpretation are inconsistent with the fitted coefficients or selected features."
+      ],
+      "notes": "Task V interpretations should be judged against the plotted model and the selected 50-point grid resolution, not against an uncomputed theoretical optimum."
+    },
+    {
+      "task_id": "task6",
+      "title": "Deliverables",
+      "max_points": 5,
+      "source_refs": [
+        "project_project_01_intro_to_modeling_pdf"
+      ],
+      "criteria": [
+        {
+          "criterion_id": "t6_c1",
+          "description": "Deliverables: submit the notebook .ipynb, .pdf, and .py, three CSVs, and four PNGs with the required original filenames; the .py export contains the same code as the notebook.",
+          "requirement_type": "deliverable",
+          "max_points": 5,
+          "source_refs": [
+            "project_project_01_intro_to_modeling_pdf"
+          ],
+          "evidence": [
+            {
+              "evidence_type": "file_presence",
+              "description": "All ten required deliverables, with original filenames checked locally before anonymization.",
+              "required": true,
+              "artifact_patterns": [
+                "username_pr01_notebook.ipynb",
+                "username_pr01_notebook.pdf",
+                "username_pr01_notebook.py",
+                "username_pr01_analysis.csv",
+                "username_pr01_grouped.csv",
+                "username_pr01_model.csv",
+                "username_pr01_correlation.png",
+                "username_pr01_pairplot.png",
+                "username_pr01_surface.png",
+                "username_pr01_contour.png"
+              ],
+              "location_hint": "Assignment page 8, Deliverables",
+              "verification": "presence_only"
+            },
+            {
+              "evidence_type": "source_code",
+              "description": "Compare the submitted notebook code cells with the Python export; export headers, comments, markdown, and equivalent notebook-magic wrappers may differ.",
+              "required": true,
+              "artifact_patterns": [
+                "*.ipynb",
+                "*.py"
+              ],
+              "location_hint": "Assignment page 8, Python notebook export",
+              "verification": "compare"
+            }
+          ],
+          "full_credit_condition": "All ten required original filenames are present, and the .py export preserves the notebook code. Confirm readable submitted PDF content manually if needed; PDF presence alone does not establish content equivalence. Tool anonymization prefixes/placeholders must not cause a deduction.",
+          "deduction_rules": [
+            {
+              "rule_id": "t6_c1_notebook_ipynb_filename",
+              "condition": "The local original filename check for notebook_ipynb is no_exact_match. This covers either absence of the exact required file or a filename mismatch; do not infer missing content from the name check. Apply once for this deliverable.",
+              "deduction_points": 1,
+              "basis": "filename",
+              "deliverable_id": "notebook_ipynb"
+            },
+            {
+              "rule_id": "t6_c1_notebook_pdf_filename",
+              "condition": "The local original filename check for notebook_pdf is no_exact_match. This covers either absence of the exact required file or a filename mismatch; do not infer missing content from the name check. Apply once for this deliverable.",
+              "deduction_points": 1,
+              "basis": "filename",
+              "deliverable_id": "notebook_pdf"
+            },
+            {
+              "rule_id": "t6_c1_notebook_py_filename",
+              "condition": "The local original filename check for notebook_py is no_exact_match. This covers either absence of the exact required file or a filename mismatch; do not infer missing content from the name check. Apply once for this deliverable.",
+              "deduction_points": 1,
+              "basis": "filename",
+              "deliverable_id": "notebook_py"
+            },
+            {
+              "rule_id": "t6_c1_analysis_csv_filename",
+              "condition": "The local original filename check for analysis_csv is no_exact_match. This covers either absence of the exact required file or a filename mismatch; do not infer missing content from the name check. Apply once for this deliverable.",
+              "deduction_points": 1,
+              "basis": "filename",
+              "deliverable_id": "analysis_csv"
+            },
+            {
+              "rule_id": "t6_c1_grouped_csv_filename",
+              "condition": "The local original filename check for grouped_csv is no_exact_match. This covers either absence of the exact required file or a filename mismatch; do not infer missing content from the name check. Apply once for this deliverable.",
+              "deduction_points": 1,
+              "basis": "filename",
+              "deliverable_id": "grouped_csv"
+            },
+            {
+              "rule_id": "t6_c1_model_csv_filename",
+              "condition": "The local original filename check for model_csv is no_exact_match. This covers either absence of the exact required file or a filename mismatch; do not infer missing content from the name check. Apply once for this deliverable.",
+              "deduction_points": 1,
+              "basis": "filename",
+              "deliverable_id": "model_csv"
+            },
+            {
+              "rule_id": "t6_c1_correlation_png_filename",
+              "condition": "The local original filename check for correlation_png is no_exact_match. This covers either absence of the exact required file or a filename mismatch; do not infer missing content from the name check. Apply once for this deliverable.",
+              "deduction_points": 1,
+              "basis": "filename",
+              "deliverable_id": "correlation_png"
+            },
+            {
+              "rule_id": "t6_c1_pairplot_png_filename",
+              "condition": "The local original filename check for pairplot_png is no_exact_match. This covers either absence of the exact required file or a filename mismatch; do not infer missing content from the name check. Apply once for this deliverable.",
+              "deduction_points": 1,
+              "basis": "filename",
+              "deliverable_id": "pairplot_png"
+            },
+            {
+              "rule_id": "t6_c1_surface_png_filename",
+              "condition": "The local original filename check for surface_png is no_exact_match. This covers either absence of the exact required file or a filename mismatch; do not infer missing content from the name check. Apply once for this deliverable.",
+              "deduction_points": 1,
+              "basis": "filename",
+              "deliverable_id": "surface_png"
+            },
+            {
+              "rule_id": "t6_c1_contour_png_filename",
+              "condition": "The local original filename check for contour_png is no_exact_match. This covers either absence of the exact required file or a filename mismatch; do not infer missing content from the name check. Apply once for this deliverable.",
+              "deduction_points": 1,
+              "basis": "filename",
+              "deliverable_id": "contour_png"
+            },
+            {
+              "rule_id": "t6_c1_code_mismatch",
+              "condition": "A supplied Python export demonstrably omits or changes substantive notebook code. Do not apply when no readable Python export is supplied, or for comments, export headers, markdown, or equivalent notebook-magic wrappers.",
+              "deduction_points": 1,
+              "basis": "technical"
+            }
+          ],
+          "review_triggers": [
+            "Any missing or misnamed deliverable.",
+            "Notebook/Python export code cannot be compared reliably.",
+            "PDF readability or export correspondence has not been manually verified."
+          ],
+          "feedback_guidance": "Proposed partial-credit schedule: one point per missing or misnamed deliverable, at most one cause per deliverable and a maximum total deduction of five points. A missing file and its filename are one cause. Technical content is scored in tasks1-5; packaging is scored here. Do not apply the Python code mismatch rule when the Python file is absent. Use only the approved rule amounts; other shortcomings require instructor review. Do not deduct more than the criterion maximum."
+        }
+      ]
+    }
+  ],
+  "known_ambiguities": [
+    {
+      "ambiguity_id": "amb1",
+      "description": "The published assignment specifies task and deliverable points, but does not provide a fine-grained criterion-level point split within each task beyond the published subtask point values.",
+      "source_refs": [
+        "project_project_01_intro_to_modeling_pdf"
+      ],
+      "affects": [
+        "task1",
+        "task2",
+        "task3",
+        "task4",
+        "task5"
+      ],
+      "status": "resolved",
+      "agent_proposed_interpretation": "Use the published task/subtask point values as the grading maxima for the corresponding criteria; do not infer additional hidden weighting.",
+      "instructor_ruling": "Adopt the published task/subtask point totals as written."
+    },
+    {
+      "ambiguity_id": "amb2",
+      "description": "Task III permits selection of any two of the three candidate features, but the assignment does not prescribe a unique feature pair.",
+      "source_refs": [
+        "project_project_01_intro_to_modeling_pdf"
+      ],
+      "affects": [
+        "t3_c3",
+        "t4_c1",
+        "t4_c2",
+        "t4_c3",
+        "t5_c1",
+        "t5_c2",
+        "t5_c3",
+        "t5_c4"
+      ],
+      "status": "resolved",
+      "agent_proposed_interpretation": "Accept any technically defensible pair supported by the student's correlation, pairplot, and engineering rationale.",
+      "instructor_ruling": "Use the student-chosen pair if the justification is defensible and consistent."
+    }
+  ],
+  "global_review_triggers": [
+    "Submitted notebook does not preserve visible outputs required by the assignment.",
+    "Required files are missing or mislabeled.",
+    "The student uses a different feature pair without adequate justification or internal consistency.",
+    "The student treats a statistical outlier as automatically invalid without explanation.",
+    "The student claims a best predicted grid point is a confirmed global optimum."
+  ],
+  "notes": "Corrected draft revision 0.2 for instructor review; not approved. Assignment pages 2-8 control: Task I 25, II 20, III 15, IV 15, V 20, Deliverables 5 = 100. The separate engineering reflection and deliverables criteria restore the two omitted five-point components. All deduction amounts are proposed partial-credit policy; the assignment explicitly publishes maxima, not this detailed deduction schedule. Approving this draft approves the proposed schedule. Original filename failures are scored once in task6. Correct lap conversion, std_sector_3_time_s, and sorted grouped rows must not be penalized. PDFs remain presence-only and may need manual review. run_v001 remains the original record and is not a corrected grading run."
+}

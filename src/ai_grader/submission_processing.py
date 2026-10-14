@@ -499,6 +499,21 @@ def write_submission_manifest(project_path):
             anonymized_root=temporary_path,
         )
 
+        from ai_grader.spec_validation import latest_spec_path
+        from ai_grader.submission_checks import original_filename_checks
+        try:
+            spec_path = latest_spec_path(grader_path)
+        except FileNotFoundError:
+            spec_path = None
+        if spec_path is not None:
+            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+            for submission in submissions:
+                identity = student_map[submission["student_id"]]
+                submission["deliverable_checks"] = original_filename_checks(
+                    project_path / "submissions" / identity["selected_source_folder"],
+                    identity["username"], identity["full_name"], spec,
+                )
+
         manifest = {
             "manifest_version": "2.0",
             "anonymization": {

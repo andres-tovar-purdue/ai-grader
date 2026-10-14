@@ -1,6 +1,6 @@
 import unittest
 
-from project_grader.grading_validation import calculate_grading_result
+from ai_grader.grading_validation import calculate_grading_result
 
 
 class GradingValidationTests(unittest.TestCase):
@@ -54,6 +54,7 @@ class GradingValidationTests(unittest.TestCase):
         for item in response["criteria"]:
             item["agent_score"] = 0.5
             item["deductions"] = [{
+                "rule_id": "missing_evidence",
                 "points": 0.5,
                 "reason": "Same missing screenshot.",
                 "deduction_type": "inadequate_required_evidence",
@@ -64,9 +65,11 @@ class GradingValidationTests(unittest.TestCase):
             calculate_grading_result(response, spec, submission)
 
     def _policy_fixture(self, two_criteria=False):
-        criteria = [{"criterion_id": "C1", "max_points": 1}]
+        criteria = [{"criterion_id": "C1", "max_points": 1,
+                     "deduction_rules": [{"rule_id": "missing_evidence", "deduction_points": 0.5}]}]
         if two_criteria:
-            criteria.append({"criterion_id": "C2", "max_points": 1})
+            criteria.append({"criterion_id": "C2", "max_points": 1,
+                             "deduction_rules": [{"rule_id": "missing_evidence", "deduction_points": 0.5}]})
         spec = {
             "project": {"total_points": len(criteria)},
             "tasks": [{

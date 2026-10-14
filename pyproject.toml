@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "engineering-project-grader"
+name = "ai-grader"
 version = "0.1.0"
 description = "Modular AI grading agent for engineering programming projects"
 requires-python = ">=3.10"

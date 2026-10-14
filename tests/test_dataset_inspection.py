@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from project_grader.dataset_inspection import summarize_csv
+from ai_grader.dataset_inspection import summarize_csv
 
 
 class DatasetInspectionTests(unittest.TestCase):

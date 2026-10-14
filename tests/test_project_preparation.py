@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from project_grader.project_preparation import prepare_project
+from ai_grader.project_preparation import prepare_project
 
 
 def valid_artifacts():

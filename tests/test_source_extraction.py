@@ -3,14 +3,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from project_grader.source_extraction import (
+from ai_grader.source_extraction import (
     discover_project_sources,
     extract_pdf,
 )
 
 
 class SourceExtractionTests(unittest.TestCase):
-    @patch("project_grader.source_extraction.PdfReader")
+    @patch("ai_grader.source_extraction.PdfReader")
     def test_pdf_extraction_preserves_page_numbers(self, reader_class):
         page_one = MagicMock()
         page_one.extract_text.return_value = "First page"
@@ -25,7 +25,7 @@ class SourceExtractionTests(unittest.TestCase):
             {"page": 2, "text": "Second page"},
         ])
 
-    @patch("project_grader.source_extraction.PdfReader")
+    @patch("ai_grader.source_extraction.PdfReader")
     def test_image_only_pdf_fails_clearly(self, reader_class):
         page = MagicMock()
         page.extract_text.return_value = ""

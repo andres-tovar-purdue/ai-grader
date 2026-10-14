@@ -5,17 +5,18 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from project_grader.finalization import finalize_grading
-from project_grader.grading import grade_submissions
-from project_grader.project_initialization import PROJECT_SUBFOLDERS, init_project
-from project_grader.project_inspection import inspect_project
-from project_grader.project_manifest import write_project_manifest
-from project_grader.project_preparation import prepare_project
-from project_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
-from project_grader.spec_approval import approve_grading_spec
-from project_grader.spec_generation import generate_grading_spec
-from project_grader.spec_validation import validate_grading_spec
-from project_grader.submission_processing import write_submission_manifest
+from ai_grader.finalization import finalize_grading
+from ai_grader.grading import grade_submissions
+from ai_grader.project_initialization import PROJECT_SUBFOLDERS, init_project
+from ai_grader.project_inspection import inspect_project
+from ai_grader.project_manifest import write_project_manifest
+from ai_grader.project_preparation import prepare_project
+from ai_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
+from ai_grader.spec_approval import approve_grading_spec
+from ai_grader.spec_generation import generate_grading_spec
+from ai_grader.spec_validation import validate_grading_spec
+from ai_grader.submission_processing import write_submission_manifest
+from ai_grader.submission_checks import refresh_submission_checks
 
 
 load_dotenv()
@@ -117,7 +118,7 @@ def latest_finalization_for_run(project_path, grading_run):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Engineering Project Grader"
+        description="AI Grader"
     )
 
     subparsers = parser.add_subparsers(
@@ -219,6 +220,12 @@ def main():
         help="Path to the project folder."
     )
 
+    checks_parser = subparsers.add_parser(
+        "refresh-submission-checks",
+        help="Check original filenames locally without replacing anonymized submissions.",
+    )
+    checks_parser.add_argument("project_path", help="Path to the project folder.")
+
     # grade-submissions command
     grade_parser = subparsers.add_parser(
         "grade-submissions",
@@ -298,7 +305,7 @@ def main():
         print("  3. Place downloaded Brightspace submissions in submissions\\")
 
         print_next_command(
-            f'python -m project_grader inspect "{project_path}"'
+            f'python -m ai_grader inspect "{project_path}"'
         )
 
     elif args.command == "prepare-project":
@@ -330,7 +337,7 @@ def main():
         print("  - no new student requirements were introduced.")
 
         print_next_command(
-            f'python -m project_grader generate-spec "{args.project_path}"'
+            f'python -m ai_grader generate-spec "{args.project_path}"'
         )
 
     elif args.command == "validate":
@@ -423,7 +430,7 @@ def main():
                 print("  - submissions\\ contains the downloaded student submissions.")
 
                 print_next_command(
-                    f'python -m project_grader prepare-project "{args.project_path}"'
+                    f'python -m ai_grader prepare-project "{args.project_path}"'
                 )
 
             elif len(existing_prep) != len(prep_paths):
@@ -453,7 +460,7 @@ def main():
                 print("  - no new student requirements were introduced.")
 
                 print_next_command(
-                    f'python -m project_grader generate-spec "{args.project_path}"'
+                    f'python -m ai_grader generate-spec "{args.project_path}"'
                 )
 
             elif spec_status == "draft":
@@ -490,7 +497,7 @@ def main():
                     )
 
                 print_next_command(
-                    f'python -m project_grader approve-spec "{spec_path}"'
+                    f'python -m ai_grader approve-spec "{spec_path}"'
                 )
 
             elif spec_status not in {"approved", "draft"}:
@@ -503,7 +510,7 @@ def main():
                 print("Review or validate the specification before continuing.")
 
                 print_next_command(
-                    f'python -m project_grader validate "{spec_path}"'
+                    f'python -m ai_grader validate "{spec_path}"'
                 )
 
             elif spec_status == "approved" and not submissions_prepared:
@@ -517,7 +524,7 @@ def main():
                 )
 
                 print_next_command(
-                    f'python -m project_grader prepare-submissions "{args.project_path}"'
+                    f'python -m ai_grader prepare-submissions "{args.project_path}"'
                 )
 
             elif submissions_prepared and grading_run is None:
@@ -532,7 +539,7 @@ def main():
                 )
 
                 print_next_command(
-                    f'python -m project_grader grade-submissions "{args.project_path}"'
+                    f'python -m ai_grader grade-submissions "{args.project_path}"'
                 )
 
             elif grading_run is not None and finalization is None:
@@ -562,7 +569,7 @@ def main():
                 print("Next command template:")
                 print()
                 print(
-                    f'python -m project_grader finalize-grading '
+                    f'python -m ai_grader finalize-grading '
                     f'"{args.project_path}" --run {grading_run.name} '
                     f'--score Student_001=POINTS'
                 )
@@ -646,7 +653,7 @@ def main():
             )
 
         print_next_command(
-            f'python -m project_grader approve-spec "{output_path}"'
+            f'python -m ai_grader approve-spec "{output_path}"'
         )
 
     elif args.command == "approve-spec":
@@ -692,7 +699,7 @@ def main():
             print("After resolving them, run:")
             print()
             print(
-                f'python -m project_grader approve-spec "{spec_path}"'
+                f'python -m ai_grader approve-spec "{spec_path}"'
             )
             print()
             print(
@@ -701,7 +708,7 @@ def main():
             )
             print()
             print(
-                f'python -m project_grader approve-spec "{spec_path}" '
+                f'python -m ai_grader approve-spec "{spec_path}" '
                 "--allow-unresolved"
             )
             return
@@ -723,9 +730,12 @@ def main():
             )
 
         project_path = project_path_from_spec(args.spec_path)
-
+        if (project_path / "grader" / "anonymized_submissions").is_dir():
+            next_step = "refresh-submission-checks"
+        else:
+            next_step = "prepare-submissions"
         print_next_command(
-            f'python -m project_grader prepare-submissions "{project_path}"'
+            f'python -m ai_grader {next_step} "{project_path}"'
         )
 
     elif args.command == "prepare-submissions":
@@ -775,8 +785,14 @@ def main():
         print("Keep student_map.json private; it contains the identity mapping.")
 
         print_next_command(
-            f'python -m project_grader grade-submissions "{args.project_path}"'
+            f'python -m ai_grader grade-submissions "{args.project_path}"'
         )
+
+    elif args.command == "refresh-submission-checks":
+        manifest_path, manifest = refresh_submission_checks(args.project_path)
+        print(f"Original filename checks refreshed for {manifest['submission_count']} submissions.")
+        print(f"Manifest: {manifest_path}")
+        print_next_command(f'python -m ai_grader grade-submissions "{args.project_path}"')
 
     elif args.command == "grade-submissions":
         run_path, json_path, csv_path, run = grade_submissions(
@@ -807,7 +823,7 @@ def main():
         print("Command template:")
         print()
         print(
-            f'python -m project_grader finalize-grading "{args.project_path}" '
+            f'python -m ai_grader finalize-grading "{args.project_path}" '
             f'--run {Path(run_path).name} --score Student_001=POINTS'
         )
 

@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from project_grader.spec_validation import (
+from ai_grader.spec_validation import (
     load_json,
     validate_grading_spec,
 )

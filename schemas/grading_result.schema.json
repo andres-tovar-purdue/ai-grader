@@ -11,27 +11,44 @@
     "review_reasons"
   ],
   "properties": {
-    "student_id": {"type": "string", "pattern": "^Student_[0-9]{3}$"},
+    "student_id": {
+      "type": "string",
+      "pattern": "^Student_[0-9]{3}$"
+    },
     "criteria": {
       "type": "array",
-      "items": {"$ref": "#/$defs/criterion_result"}
+      "items": {
+        "$ref": "#/$defs/criterion_result"
+      }
     },
     "task_feedback": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["task_id", "feedback"],
+        "required": [
+          "task_id",
+          "feedback"
+        ],
         "properties": {
-          "task_id": {"type": "string", "minLength": 1},
-          "feedback": {"type": "string"}
+          "task_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "feedback": {
+            "type": "string"
+          }
         }
       }
     },
-    "review_required": {"type": "boolean"},
+    "review_required": {
+      "type": "boolean"
+    },
     "review_reasons": {
       "type": "array",
-      "items": {"type": "string"}
+      "items": {
+        "type": "string"
+      }
     }
   },
   "$defs": {
@@ -50,17 +67,36 @@
         "review_reasons"
       ],
       "properties": {
-        "criterion_id": {"type": "string", "minLength": 1},
-        "agent_score": {"type": "number", "minimum": 0},
+        "criterion_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "agent_score": {
+          "type": "number",
+          "minimum": 0
+        },
         "deductions": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["points", "reason", "deduction_type", "cause_id", "independent_requirement"],
+            "required": [
+              "points",
+              "reason",
+              "deduction_type",
+              "cause_id",
+              "independent_requirement",
+              "rule_id"
+            ],
             "properties": {
-              "points": {"type": "number", "exclusiveMinimum": 0},
-              "reason": {"type": "string", "minLength": 1},
+              "points": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
               "deduction_type": {
                 "type": "string",
                 "enum": [
@@ -72,20 +108,41 @@
                   "downstream_consequence"
                 ]
               },
-              "cause_id": {"type": "string", "minLength": 1},
-              "independent_requirement": {"type": "boolean"}
+              "cause_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "independent_requirement": {
+                "type": "boolean"
+              },
+              "rule_id": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         },
-        "justification": {"type": "string", "minLength": 1},
+        "justification": {
+          "type": "string",
+          "minLength": 1
+        },
         "evidence": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["artifact_path", "evidence_type", "location"],
+            "required": [
+              "artifact_path",
+              "evidence_type",
+              "location"
+            ],
             "properties": {
-              "artifact_path": {"type": ["string", "null"]},
+              "artifact_path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "evidence_type": {
                 "type": "string",
                 "enum": [
@@ -95,7 +152,9 @@
                   "unverifiable"
                 ]
               },
-              "location": {"type": "string"}
+              "location": {
+                "type": "string"
+              }
             }
           }
         },
@@ -112,12 +171,20 @@
         },
         "confidence": {
           "type": "string",
-          "enum": ["high", "medium", "low"]
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
         },
-        "review_required": {"type": "boolean"},
+        "review_required": {
+          "type": "boolean"
+        },
         "review_reasons": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

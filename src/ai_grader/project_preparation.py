@@ -3,9 +3,9 @@ import os
 import re
 from pathlib import Path
 
-from project_grader.ai_client import get_client
-from project_grader.dataset_inspection import collect_csv_datasets
-from project_grader.source_extraction import discover_project_sources
+from ai_grader.ai_client import get_client
+from ai_grader.dataset_inspection import collect_csv_datasets
+from ai_grader.source_extraction import discover_project_sources
 
 
 OUTPUT_PATHS = {

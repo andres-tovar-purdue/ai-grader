@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from project_grader.submission_processing import write_submission_manifest
+from ai_grader.submission_processing import write_submission_manifest
 
 
 class SubmissionAnonymizationTests(unittest.TestCase):

@@ -1,7 +1,7 @@
 import unittest
 
-from project_grader.grading_validation import calculate_grading_result
-from project_grader.rounding import apply_rounding, round_up_to_increment
+from ai_grader.grading_validation import calculate_grading_result
+from ai_grader.rounding import apply_rounding, round_up_to_increment
 
 
 class RoundingTests(unittest.TestCase):
@@ -48,8 +48,10 @@ class RoundingTests(unittest.TestCase):
                 "title": "Task",
                 "max_points": 20,
                 "criteria": [
-                    {"criterion_id": "C1", "max_points": 10},
-                    {"criterion_id": "C2", "max_points": 10},
+                    {"criterion_id": "C1", "max_points": 10,
+                     "deduction_rules": [{"rule_id": "C1_rule", "deduction_points": 3.99}]},
+                    {"criterion_id": "C2", "max_points": 10,
+                     "deduction_rules": [{"rule_id": "C2_rule", "deduction_points": 3.0}]},
                 ],
             }],
         }
@@ -91,6 +93,7 @@ class RoundingTests(unittest.TestCase):
             "criterion_id": criterion_id,
             "agent_score": score,
             "deductions": [{
+                "rule_id": criterion_id + "_rule",
                 "points": deduction,
                 "reason": "Rubric deduction.",
                 "deduction_type": "demonstrated_technical_error",

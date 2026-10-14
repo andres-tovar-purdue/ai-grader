@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from project_grader.artifact_validation import inspect_slx_package
+from ai_grader.artifact_validation import inspect_slx_package
 
 
 class ArtifactValidationTests(unittest.TestCase):

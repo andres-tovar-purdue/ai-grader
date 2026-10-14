@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from project_grader.grading import (
+from ai_grader.grading import (
     DEFAULT_GRADING_MODEL,
     build_student_input,
     grade_submissions,
@@ -37,6 +37,7 @@ def model_response():
             "criterion_id": "T1_C1",
             "agent_score": 0.75,
             "deductions": [{
+                "rule_id": "minor_issue_rule",
                 "points": 0.25,
                 "reason": "Minor issue.",
                 "deduction_type": "demonstrated_technical_error",
@@ -111,6 +112,7 @@ class GradingTests(unittest.TestCase):
                     "requirement_type": "technical_correctness",
                     "max_points": 1,
                     "full_credit_condition": "Requirement is satisfied.",
+                    "deduction_rules": [{"rule_id": "minor_issue_rule", "condition": "Minor issue.", "deduction_points": 0.25}],
                 }],
             }],
             "known_ambiguities": [],
@@ -189,6 +191,10 @@ class GradingTests(unittest.TestCase):
             self.assertTrue(json_path.is_file())
             rows = list(csv.DictReader(io.StringIO(csv_path.read_text(encoding="utf-8"))))
             self.assertEqual(rows[0]["total_instructor_score"], "")
+            self.assertEqual(float(rows[0]["maximum_score"]), 1)
+            self.assertEqual(float(rows[0]["task_1_score"]), 1)
+            self.assertEqual(float(rows[0]["task_1_max_points"]), 1)
+            self.assertEqual(float(rows[0]["raw_total_before_rounding"]), .75)
 
     def test_default_model_and_usage_are_recorded_without_real_api(self):
         with tempfile.TemporaryDirectory() as directory:

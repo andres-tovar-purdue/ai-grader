@@ -3,10 +3,10 @@ import os
 import re
 from pathlib import Path
 
-from project_grader.ai_client import get_client
-from project_grader.project_manifest import build_project_manifest
-from project_grader.source_extraction import extract_pdf
-from project_grader.spec_validation import validate_grading_spec
+from ai_grader.ai_client import get_client
+from ai_grader.project_manifest import build_project_manifest
+from ai_grader.source_extraction import extract_pdf
+from ai_grader.spec_validation import validate_grading_spec
 
 
 SOURCE_FOLDERS = {
@@ -234,7 +234,20 @@ IMPORTANT RULES:
 18. Allow technically valid alternatives when the published
     project does not prescribe a unique implementation.
 
-19. Return ONLY a JSON object. Do not use Markdown fences,
+19. Each numeric deduction rule needs a stable rule_id, exact deduction_points,
+    and a clear condition. State in notes which deduction amounts are proposed
+    instructor policy rather than explicitly published penalties. Set basis to
+    filename and deliverable_id to the corresponding listed deliverable for every
+    filename rule. Keep filename/missing-export penalties in one owning criterion;
+    do not duplicate them in technical content criteria. New filenames are checked
+    locally before anonymization. Use max_applications only for independently
+    omitted requirements; rule amounts must not exceed the criterion maximum.
+
+20. Preserve every separately scored reflection or interpretation component.
+    PDFs and unsupported saved outputs may need manual instructor review; never
+    create deductions for the grading tool's inability to inspect them.
+
+21. Return ONLY a JSON object. Do not use Markdown fences,
     explanations, or commentary outside the JSON.
 
 JSON SCHEMA:
@@ -274,36 +287,8 @@ def parse_json_response(text):
 
 
 def validate_scoring_totals(spec):
-    """
-    Verify that criterion, task, and project point totals are internally consistent.
-    """
-
-    task_total = 0.0
-
-    for task in spec["tasks"]:
-        criterion_total = sum(
-            float(criterion["max_points"])
-            for criterion in task["criteria"]
-        )
-        task_max = float(task["max_points"])
-
-        if abs(criterion_total - task_max) > 1e-9:
-            raise RuntimeError(
-                f"Task {task['task_id']} criterion points sum to "
-                f"{criterion_total:g}, but task max_points is {task_max:g}."
-            )
-
-        task_total += task_max
-
-    project_total = float(spec["project"]["total_points"])
-
-    if abs(task_total - project_total) > 1e-9:
-        raise RuntimeError(
-            f"Grading specification task points sum to {task_total:g}, "
-            f"but project total_points is {project_total:g}. "
-            "If the published assignment has a separately scored Deliverables "
-            "section, include it as a task."
-        )
+    from ai_grader.spec_validation import validate_scoring_totals as validate
+    return validate(spec)
 
 
 def generate_grading_spec(
@@ -369,6 +354,8 @@ def generate_grading_spec(
         response.output_text
     )
 
+    spec["status"] = "draft"
+    spec.pop("approval", None)
     # Enforce scoring consistency before writing the draft specification.
     validate_scoring_totals(spec)
 
@@ -378,10 +365,11 @@ def generate_grading_spec(
         exist_ok=True,
     )
 
-    output_path = (
-        grader_path
-        / "grading_spec_v001.json"
-    )
+    from ai_grader.spec_validation import validate_spec_data
+    validate_spec_data(spec, schema)
+    versions = [int(path.stem.rsplit("v", 1)[1])
+                for path in grader_path.glob("grading_spec_v[0-9][0-9][0-9].json")]
+    output_path = grader_path / f"grading_spec_v{max(versions, default=0) + 1:03d}.json"
 
     with output_path.open(
         "w",

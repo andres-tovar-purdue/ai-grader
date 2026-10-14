@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from project_grader.project_inspection import inspect_project
+from ai_grader.project_inspection import inspect_project
 
 
 MANIFEST_FILENAME = "project_manifest.json"
