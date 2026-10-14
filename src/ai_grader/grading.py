@@ -387,6 +387,7 @@ def render_preliminary_csv(results, spec):
         "raw_total_before_rounding",
         "total_rounding_adjustment",
         "total_instructor_score",
+        "validation_status",
         *task_columns,
         "review_required",
         "review_reasons",
@@ -402,6 +403,7 @@ def render_preliminary_csv(results, spec):
             "raw_total_before_rounding": result["raw_total_before_rounding"],
             "total_rounding_adjustment": result["total_rounding_adjustment"],
             "total_instructor_score": "",
+            "validation_status": result.get("validation_status", "validated"),
             "review_required": str(result["review_required"]).lower(),
             "review_reasons": " | ".join(result["review_reasons"]),
         }
@@ -483,6 +485,8 @@ def grade_submissions(
                 "model": selected_model,
                 "usage": extract_response_usage(response),
                 "output_text": response.output_text,
+                "grading_spec_sha256": spec_fingerprint(spec),
+                "submission_sha256": spec_fingerprint(submission),
             }, indent=2),
             encoding="utf-8",
         )
@@ -504,6 +508,14 @@ def grade_submissions(
         })
         results.append(calculated)
 
+    return write_grading_run(project_path, spec_path, spec, manifest_path,
+                             results, per_student_usage, selected_model, rounding_policy)
+
+
+def write_grading_run(project_path, spec_path, spec, manifest_path, results,
+                      per_student_usage, selected_model, rounding_policy,
+                      recovery=None):
+    """Write a new preliminary run after all results have been prepared locally."""
     usage_fields = (
         "input_tokens",
         "cached_input_tokens",
@@ -536,6 +548,13 @@ def grade_submissions(
         "maximum_score": spec["project"]["total_points"],
         "results": results,
     }
+    if recovery is not None:
+        run["recovery"] = recovery
+        invalid_count = sum(item.get("validation_status") == "invalid_model_response"
+                            for item in results)
+        run["unscored_submission_count"] = invalid_count
+        if invalid_count:
+            run["status"] = "preliminary_validation_review_required"
 
     run_path = next_grading_run_path(project_path / "grader")
     run["run_version"] = run_path.name.removeprefix("run_v")

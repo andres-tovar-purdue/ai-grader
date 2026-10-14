@@ -90,6 +90,12 @@ def finalize_grading(
     expected_tasks = {task["task_id"]: task for task in spec["tasks"]}
     if not run.get("results"):
         raise ValueError("Grading run has no results to finalize.")
+    invalid_ids = [result['student_id'] for result in run['results']
+                   if result.get('validation_status') == 'invalid_model_response']
+    if invalid_ids:
+        raise ValueError("Cannot finalize unscored invalid model responses: "
+                         + ', '.join(invalid_ids)
+                         + '. Correct and revalidate the saved responses first.')
     student_map = json.loads((grader / "student_map.json").read_text(encoding="utf-8"))
     criterion_overrides = criterion_overrides or {}
 

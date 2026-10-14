@@ -109,7 +109,8 @@ def calculate_grading_result(
                 if not math.isfinite(points) or points <= 0:
                     raise ValueError(f"{rule_id} deduction must be finite and positive.")
                 if abs(points - float(rule["deduction_points"])) > 1e-6:
-                    raise ValueError(f"{rule_id} deduction points do not match the approved rule.")
+                    raise ValueError(f"{rule_id} deduction points do not match the approved rule: "
+                                     f"received {points:g}, approved {float(rule['deduction_points']):g}.")
                 rule_uses[rule_id] += 1
                 if rule_uses[rule_id] > rule.get("max_applications", 1):
                     raise ValueError(f"{rule_id} deduction rule applied too many times.")

@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from ai_grader.finalization import finalize_grading
 from ai_grader.grading import grade_submissions
+from ai_grader.recovery import recover_grading
 from ai_grader.project_initialization import PROJECT_SUBFOLDERS, init_project
 from ai_grader.project_inspection import inspect_project
 from ai_grader.project_manifest import write_project_manifest
@@ -251,6 +252,15 @@ def main():
         default=DEFAULT_ROUNDING_POLICY,
         help="Task/project rounding policy for new preliminary grades.",
     )
+
+    recovery_parser = subparsers.add_parser(
+        "recover-grading", help="Recover saved model responses offline; invalid results remain unscored.",
+    )
+    recovery_parser.add_argument("project_path", help="Path to the project folder.")
+    recovery_parser.add_argument("--response-pattern", required=True,
+                                 help="Filename pattern in grader/debug_responses; one response per student.")
+    recovery_parser.add_argument("--rounding-policy", choices=sorted(ROUNDING_POLICIES),
+                                 default=DEFAULT_ROUNDING_POLICY)
 
     # finalize-grading command
     finalize_parser = subparsers.add_parser(
@@ -546,6 +556,17 @@ def main():
                 json_path = grading_run / "grading_results.json"
                 csv_path = grading_run / "preliminary_grading_report.csv"
 
+                run_data = json.loads(json_path.read_text(encoding="utf-8")) if json_path.is_file() else {}
+                invalid_ids = [result['student_id'] for result in run_data.get('results', [])
+                               if result.get('validation_status') == 'invalid_model_response']
+                if invalid_ids:
+                    print("Workflow status: saved-response validation review required.")
+                    print("Unscored submissions: " + ', '.join(invalid_ids))
+                    print(f"Review: {csv_path}")
+                    print(f"Saved response and validation details: {json_path}")
+                    print("Correct and revalidate the invalid responses before finalization.")
+                    return
+
                 print("Workflow status: preliminary grading completed.")
                 print()
                 print("Instructor review required before finalization.")
@@ -826,6 +847,23 @@ def main():
             f'python -m ai_grader finalize-grading "{args.project_path}" '
             f'--run {Path(run_path).name} --score Student_001=POINTS'
         )
+
+    elif args.command == "recover-grading":
+        run_path, json_path, csv_path, run = recover_grading(
+            args.project_path, args.response_pattern, rounding_policy=args.rounding_policy,
+        )
+        print(f"Recovered preliminary run: {run_path}")
+        print(f"Structured results: {json_path}")
+        print(f"Instructor review report: {csv_path}")
+        print("New API calls: 0")
+        for result in run['results']:
+            if result.get('validation_status') == 'invalid_model_response':
+                print(f"{result['student_id']}: UNSCORED — {result['validation_error']}")
+            else:
+                print(f"{result['student_id']}: preliminary score {result['total_agent_score']:g}")
+        if run.get('unscored_submission_count'):
+            print("Invalid saved responses require correction and revalidation before finalization.")
+        print("Review the saved-response provenance and feedback before approving any scores.")
 
     elif args.command == "finalize-grading":
         approved_scores = {}
