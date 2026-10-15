@@ -72,6 +72,29 @@
     },
     "approval": {
       "$ref": "#/$defs/approval"
+    },
+    "grading_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "discussion_policy": {
+          "type": "string",
+          "enum": [
+            "rubric",
+            "presence_only"
+          ]
+        },
+        "filename_policy": {
+          "type": "string",
+          "enum": [
+            "rubric",
+            "warning_only"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
     }
   },
   "$defs": {
@@ -195,6 +218,15 @@
         },
         "notes": {
           "type": "string"
+        },
+        "presence_patterns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Patterns for anonymized filenames used to establish file presence independently of required original naming."
         }
       }
     },
@@ -456,7 +488,8 @@
           "type": "string",
           "enum": [
             "technical",
-            "filename"
+            "filename",
+            "file_presence"
           ]
         },
         "deliverable_id": {

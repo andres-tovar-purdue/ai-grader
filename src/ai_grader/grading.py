@@ -15,7 +15,7 @@ from ai_grader.grading_validation import (
     validate_model_grading_response,
 )
 from ai_grader.spec_validation import latest_spec_path, validate_grading_spec
-from ai_grader.submission_checks import spec_fingerprint
+from ai_grader.submission_checks import spec_fingerprint, deliverable_presence_checks
 from ai_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
 
 
@@ -23,7 +23,7 @@ SUBMISSION_MANIFEST_FILENAME = "submission_manifest.json"
 ANONYMIZED_FOLDER = "anonymized_submissions"
 GRADING_RUNS_FOLDER = "grading_runs"
 DEFAULT_GRADING_MODEL = "gpt-5.4-mini"
-TEXT_EXTENSIONS = {".m", ".py", ".txt", ".md", ".csv", ".json", ".ipynb"}
+TEXT_EXTENSIONS = {".m", ".py", ".bas", ".txt", ".md", ".csv", ".json", ".ipynb"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 FORBIDDEN_MANIFEST_KEYS = {
     "username",
@@ -341,6 +341,11 @@ def build_student_input(spec, submission, student_root, instructions):
         instructions,
         "APPROVED GRADING SPECIFICATION:\n" + json.dumps(spec, indent=2),
         "ANONYMIZED ARTIFACT INVENTORY:\n" + json.dumps(artifact_inventory, indent=2),
+        "LOCAL DELIVERABLE PRESENCE (independent of required original filenames):\n"
+        + json.dumps(deliverable_presence_checks(submission, spec), indent=2)
+        + "\nWhen filename_policy is warning_only, naming differences earn reminders, "
+        "not deductions. A missing-file deduction requires status missing; ambiguous "
+        "roles require instructor review without a missing-file deduction.",
         "ORIGINAL FILENAME COMPLIANCE (checked locally before anonymization):\n"
         + json.dumps(submission.get("deliverable_checks", {"status": "not_available"}), indent=2),
         "Anonymized names and <username> placeholders are tool transformations. "
@@ -420,6 +425,8 @@ def grade_submissions(
     client=None,
     model=None,
     rounding_policy=DEFAULT_ROUNDING_POLICY,
+    resume=False,
+    retry_failed=False,
 ):
     """Grade each anonymized submission independently and write a draft run."""
     project_path = Path(project_path).resolve()
@@ -438,10 +445,16 @@ def grade_submissions(
         repository_root / "prompts" / "submission_grading_instructions.md"
     ).read_text(encoding="utf-8")
 
-    client = client or get_client()
     selected_model = model or os.getenv("OPENAI_MODEL") or DEFAULT_GRADING_MODEL
     results = []
     per_student_usage = []
+    api_calls_made = 0
+    reused_responses = 0
+    api_instructions = ("You produce preliminary, evidence-based grading for instructor "
+                        "review. Never produce a final instructor grade.")
+    if retry_failed and not resume:
+        raise ValueError('retry_failed requires resume=True.')
+    from ai_grader.recovery import calculate_saved_response
 
     for index, submission in enumerate(manifest["submissions"], start=1):
         print(f"Grading {submission['student_id']} ({index}/{len(manifest['submissions'])})...", flush=True)
@@ -452,54 +465,68 @@ def grade_submissions(
             student_root,
             instructions,
         )
-        response = client.responses.create(
-            model=selected_model,
-            instructions=(
-                "You produce preliminary, evidence-based grading for instructor "
-                "review. Never produce a final instructor grade."
-            ),
-            input=api_input,
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "preliminary_grading_response",
-                    "schema": response_schema,
-                    "strict": True,
-                }
-            },
-            store=False,
-        )
-        if not response.output_text:
-            raise RuntimeError(
-                f"The model returned no grading result for {submission['student_id']}."
-            )
         debug_path = project_path / "grader" / "debug_responses"
         debug_path.mkdir(parents=True, exist_ok=True)
-        response_path = debug_path / (
-            f"{submission['student_id']}_"
-            f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.json"
-        )
-        response_path.write_text(
-            json.dumps({
+        input_sha256 = spec_fingerprint({'input': api_input, 'response_schema': response_schema,
+                                         'instructions': api_instructions})
+        saved = None
+        if resume:
+            for candidate in sorted(debug_path.glob(f"{submission['student_id']}_*.json"), reverse=True):
+                try:
+                    possible = json.loads(candidate.read_text(encoding='utf-8'))
+                except (OSError, ValueError):
+                    continue
+                if (possible.get('student_id') == submission['student_id']
+                        and possible.get('model') == selected_model
+                        and possible.get('input_sha256') == input_sha256
+                        and possible.get('grading_spec_sha256') == spec_fingerprint(spec)
+                        and possible.get('submission_sha256') == spec_fingerprint(submission)):
+                    cached_result = calculate_saved_response(possible, spec, submission,
+                                                            response_schema_path, rounding_policy)
+                    if retry_failed and cached_result['validation_status'] == 'invalid_model_response':
+                        break
+                    saved = possible
+                    reused_responses += 1
+                    print(f"Reused saved response: {candidate.name}", flush=True)
+                    break
+        if saved is None:
+            client = client or get_client()
+            saved = {
                 "student_id": submission["student_id"],
                 "model": selected_model,
-                "usage": extract_response_usage(response),
-                "output_text": response.output_text,
                 "grading_spec_sha256": spec_fingerprint(spec),
                 "submission_sha256": spec_fingerprint(submission),
-            }, indent=2),
-            encoding="utf-8",
-        )
-        print(f"Saved model response: {response_path}", flush=True)
-        model_result = parse_json_response(response.output_text)
-        validate_model_grading_response(model_result, response_schema_path)
-        calculated = calculate_grading_result(
-            model_result,
-            spec,
-            submission,
-            rounding_policy=rounding_policy,
-        )
-        usage = extract_response_usage(response)
+                "input_sha256": input_sha256,
+                "usage": None, "output_text": None,
+            }
+            api_calls_made += 1
+            try:
+                response = client.responses.create(
+                    model=selected_model,
+                    instructions=api_instructions,
+                    input=api_input,
+                    text={'format': {'type': 'json_schema', 'name': 'preliminary_grading_response',
+                                     'schema': response_schema, 'strict': True}},
+                    store=False,
+                )
+                saved['output_text'] = response.output_text
+                saved['usage'] = extract_response_usage(response)
+            except Exception as error:
+                if getattr(error, 'status_code', None) in {401, 403}:
+                    raise
+                saved['error'] = f'{type(error).__name__}: {error}'
+            response_path = debug_path / (f"{submission['student_id']}_"
+                f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.json")
+            temporary_path = response_path.with_suffix('.json.tmp')
+            temporary_path.write_text(json.dumps(saved, indent=2) + '\n', encoding='utf-8')
+            temporary_path.replace(response_path)
+            print(f"Saved model response: {response_path}", flush=True)
+        calculated = calculate_saved_response(saved, spec, submission, response_schema_path,
+                                               rounding_policy)
+        if calculated['validation_status'] == 'invalid_model_response':
+            print(f"Flagged {submission['student_id']} for review; continuing batch: "
+                  + calculated['validation_error'], flush=True)
+        usage = saved.get('usage')
         calculated["api_usage"] = usage
         per_student_usage.append({
             "student_id": submission["student_id"],
@@ -509,12 +536,14 @@ def grade_submissions(
         results.append(calculated)
 
     return write_grading_run(project_path, spec_path, spec, manifest_path,
-                             results, per_student_usage, selected_model, rounding_policy)
+                             results, per_student_usage, selected_model, rounding_policy,
+                             batch_execution={'api_calls_made': api_calls_made,
+                                              'reused_responses': reused_responses})
 
 
 def write_grading_run(project_path, spec_path, spec, manifest_path, results,
                       per_student_usage, selected_model, rounding_policy,
-                      recovery=None):
+                      recovery=None, batch_execution=None):
     """Write a new preliminary run after all results have been prepared locally."""
     usage_fields = (
         "input_tokens",
@@ -548,13 +577,15 @@ def write_grading_run(project_path, spec_path, spec, manifest_path, results,
         "maximum_score": spec["project"]["total_points"],
         "results": results,
     }
+    invalid_count = sum(item.get("validation_status") == "invalid_model_response"
+                        for item in results)
+    run["unscored_submission_count"] = invalid_count
+    if invalid_count:
+        run["status"] = "preliminary_validation_review_required"
     if recovery is not None:
         run["recovery"] = recovery
-        invalid_count = sum(item.get("validation_status") == "invalid_model_response"
-                            for item in results)
-        run["unscored_submission_count"] = invalid_count
-        if invalid_count:
-            run["status"] = "preliminary_validation_review_required"
+    if batch_execution is not None:
+        run['batch_execution'] = batch_execution
 
     run_path = next_grading_run_path(project_path / "grader")
     run["run_version"] = run_path.name.removeprefix("run_v")

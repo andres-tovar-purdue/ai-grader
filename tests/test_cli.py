@@ -60,6 +60,8 @@ class CliTests(unittest.TestCase):
             "demo",
             model=None,
             rounding_policy="generous-v1",
+            resume=False,
+            retry_failed=False,
         )
         self.assertIn("Final instructor scores were not assigned", output.getvalue())
 
@@ -81,6 +83,8 @@ class CliTests(unittest.TestCase):
             "demo",
             model="test-model",
             rounding_policy="generous-v1",
+            resume=False,
+            retry_failed=False,
         )
 
     @patch("ai_grader.cli.grade_submissions")
@@ -107,6 +111,8 @@ class CliTests(unittest.TestCase):
             "demo",
             model=None,
             rounding_policy="exact-v1",
+            resume=False,
+            retry_failed=False,
         )
 
 

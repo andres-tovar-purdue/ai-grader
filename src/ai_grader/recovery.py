@@ -38,6 +38,24 @@ def _unscored_result(submission, spec, error, raw_response):
     }
 
 
+def calculate_saved_response(saved, spec, submission, schema_path, rounding_policy):
+    """Apply the same strict validation to live, resumed, and recovered responses."""
+    raw = None
+    try:
+        if saved.get('error'):
+            raise ValueError('API request failed: ' + saved['error'])
+        if not isinstance(saved.get('output_text'), str) or not saved['output_text'].strip():
+            raise ValueError('Saved response has no output_text.')
+        raw = parse_json_response(saved['output_text'])
+        validate_model_grading_response(raw, schema_path)
+        calculated = calculate_grading_result(raw, spec, submission, rounding_policy)
+        calculated['validation_status'] = 'validated'
+        return calculated
+    except ValueError as error:
+        return _unscored_result(submission, spec, error,
+                                raw if raw is not None else saved.get('output_text'))
+
+
 def recover_grading(project_path, response_pattern,
                     rounding_policy=DEFAULT_ROUNDING_POLICY):
     """Require exactly one saved response per student, then validate and publish.
@@ -82,17 +100,7 @@ def recover_grading(project_path, response_pattern,
                      ['grading_spec_sha256', 'submission_sha256'])
         if legacy:
             legacy_ids.append(student_id)
-        if not isinstance(saved.get('output_text'), str):
-            raise ValueError(f"Saved response for {student_id} has no output_text.")
-        raw = None
-        try:
-            raw = parse_json_response(saved['output_text'])
-            validate_model_grading_response(raw, schema_path)
-            calculated = calculate_grading_result(raw, spec, submission, rounding_policy)
-            calculated['validation_status'] = 'validated'
-        except (ValueError, json.JSONDecodeError) as error:
-            calculated = _unscored_result(submission, spec, error,
-                                          raw if raw is not None else saved['output_text'])
+        calculated = calculate_saved_response(saved, spec, submission, schema_path, rounding_policy)
         if legacy:
             calculated['review_required'] = True
             calculated['review_reasons'].append(

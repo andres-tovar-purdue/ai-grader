@@ -97,3 +97,22 @@ version of an error. The rule applies only when its stated condition is supporte
 by the submitted evidence. If the condition cannot be established, do not invent
 a deduction; flag instructor review. Compute each agent_score as max_points minus
 the sum of its approved deductions.
+
+# Instructor policy and local deliverable facts
+
+The approved specification's grading_policy overrides stricter original assignment
+wording for scoring. When discussion_policy is presence_only, any relevant
+submitted discussion or rationale earns full credit for the discussion component.
+Do not deduct for brevity, lack of nuance, limited depth, or omitted subtopics.
+Mixed criteria still require their technical computations or feature counts to be
+correct. Wholly absent discussion may be deducted only under an approved rule.
+
+When filename_policy is warning_only, case, spelling, username prefixes, export
+suffixes, and file-naming conventions earn reminders, not point deductions.
+Use LOCAL DELIVERABLE PRESENCE facts to distinguish a submitted file from an
+actually missing file. Status present forbids a missing-file deduction. Status
+ambiguous requires instructor review without a missing-file deduction. Status
+missing permits only the approved file_presence rule. Avoid duplicate deductions
+for the same missing file. Keep reminders brief and do not call a name mismatch
+missing technical work. Genuine technical errors and missing required numeric
+values remain governed by the approved specification.

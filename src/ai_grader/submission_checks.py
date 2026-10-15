@@ -16,6 +16,47 @@ def spec_fingerprint(spec):
                                     allow_nan=False).encode("utf-8")).hexdigest()
 
 
+def deliverable_presence_checks(submission, spec):
+    """Match supplied artifact roles, keeping uncertain names out of deductions."""
+    deliverables = [item for item in spec['deliverables'] if item.get('presence_patterns')]
+    candidates = {
+        item['deliverable_id']: [file['path'] for file in submission['files']
+                                if any(fnmatch.fnmatchcase(file['path'].lower(), pattern.lower())
+                                       for pattern in item['presence_patterns'])]
+        for item in deliverables
+    }
+    matched_paths = {path for paths in candidates.values() for path in paths}
+    owners = {}
+    for deliverable_id, paths in candidates.items():
+        for path in paths:
+            owners.setdefault(path, set()).add(deliverable_id)
+    checks = []
+    for item in deliverables:
+        paths = candidates[item['deliverable_id']]
+        suffixes = {Path(pattern).suffix.lower() for pattern in item['presence_patterns']}
+        unknown = [file['path'] for file in submission['files']
+                   if Path(file['path']).suffix.lower() in suffixes
+                   and file['path'] not in matched_paths]
+        # A spare file assigned to another role of this type could itself be
+        # mislabeled. Do not call the missing role absent without review.
+        for other in deliverables:
+            other_suffixes = {Path(pattern).suffix.lower() for pattern in other['presence_patterns']}
+            if suffixes & other_suffixes:
+                unknown.extend(candidates[other['deliverable_id']][1:])
+        unknown = sorted(set(unknown) - set(paths))
+        if any(len(owners[path]) > 1 for path in paths):
+            status = 'ambiguous'
+        elif paths:
+            status = 'present'
+        elif unknown:
+            status = 'ambiguous'
+        else:
+            status = 'missing'
+        checks.append({'deliverable_id': item['deliverable_id'], 'status': status,
+                       'artifact_paths': paths, 'unclassified_paths': unknown})
+    return {'method': 'anonymized_file_presence_v1', 'checks': checks}
+
+
 def original_filename_checks(folder, username, full_name, spec):
     files = sorted(path for path in Path(folder).rglob("*") if path.is_file())
     checks = []

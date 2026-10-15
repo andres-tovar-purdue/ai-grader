@@ -115,6 +115,16 @@ def calculate_grading_result(
                 if rule_uses[rule_id] > rule.get("max_applications", 1):
                     raise ValueError(f"{rule_id} deduction rule applied too many times.")
                 cause_id = deduction["cause_id"]
+                if rule.get('basis') == 'file_presence':
+                    from ai_grader.submission_checks import deliverable_presence_checks
+                    checks = deliverable_presence_checks(submission, spec)['checks']
+                    check = next((item for item in checks
+                                  if item['deliverable_id'] == rule['deliverable_id']), None)
+                    if not check or check['status'] != 'missing':
+                        raise ValueError('Missing-file deduction contradicts local presence checks; '
+                                         'present or ambiguously named files cannot be penalized as missing.')
+                    cause_id = 'deliverable:' + rule['deliverable_id']
+                    deduction['cause_id'] = cause_id
                 if rule.get("basis") == "filename":
                     from ai_grader.submission_checks import spec_fingerprint
                     checks = submission.get("deliverable_checks", {})

@@ -1,13 +1,15 @@
 import argparse
 import json
 import os
+import subprocess
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from ai_grader.finalization import finalize_grading
+from ai_grader.finalization import finalize_grading, load_approved_scores
 from ai_grader.grading import grade_submissions
 from ai_grader.recovery import recover_grading
+from ai_grader.reporting import generate_review_report, open_report
 from ai_grader.project_initialization import PROJECT_SUBFOLDERS, init_project
 from ai_grader.project_inspection import inspect_project
 from ai_grader.project_manifest import write_project_manifest
@@ -252,6 +254,10 @@ def main():
         default=DEFAULT_ROUNDING_POLICY,
         help="Task/project rounding policy for new preliminary grades.",
     )
+    grade_parser.add_argument('--resume', action='store_true',
+                              help='Reuse saved responses only when model and complete inputs match.')
+    grade_parser.add_argument('--retry-failed', action='store_true',
+                              help='With --resume, retry only failed responses; reuse successful ones.')
 
     recovery_parser = subparsers.add_parser(
         "recover-grading", help="Recover saved model responses offline; invalid results remain unscored.",
@@ -261,6 +267,14 @@ def main():
                                  help="Filename pattern in grader/debug_responses; one response per student.")
     recovery_parser.add_argument("--rounding-policy", choices=sorted(ROUNDING_POLICIES),
                                  default=DEFAULT_ROUNDING_POLICY)
+
+    report_parser = subparsers.add_parser(
+        "generate-report", help="Create a named instructor review CSV with blank approval fields.",
+    )
+    report_parser.add_argument("project_path", help="Path to the project folder.")
+    report_parser.add_argument("--run", help="Run version; defaults to the latest grading run.")
+    report_parser.add_argument("--open", action="store_true",
+                               help="Open the report in the default spreadsheet application.")
 
     # finalize-grading command
     finalize_parser = subparsers.add_parser(
@@ -279,12 +293,14 @@ def main():
         help="Baseline run version."
     )
 
-    finalize_parser.add_argument(
+    score_source = finalize_parser.add_mutually_exclusive_group(required=True)
+    score_source.add_argument(
         "--score",
         action="append",
-        required=True,
         help="Approved score as Student_###=POINTS.",
     )
+    score_source.add_argument('--scores-file',
+                              help='Reviewed CSV with student_id and filled total_instructor_score columns.')
 
     finalize_parser.add_argument(
         "--criterion-score",
@@ -582,17 +598,9 @@ def main():
                     "for each student."
                 )
                 print()
-                print(
-                    "Finalization requires instructor-approved scores, so "
-                    "the command below is a template."
-                )
-                print()
-                print("Next command template:")
-                print()
-                print(
-                    f'python -m ai_grader finalize-grading '
-                    f'"{args.project_path}" --run {grading_run.name} '
-                    f'--score Student_001=POINTS'
+                print_next_command(
+                    f'python -m ai_grader generate-report '
+                    f'"{args.project_path}" --run {grading_run.name} --open'
                 )
 
             else:
@@ -820,6 +828,8 @@ def main():
             args.project_path,
             model=args.model,
             rounding_policy=args.rounding_policy,
+            resume=args.resume,
+            retry_failed=args.retry_failed,
         )
 
         print()
@@ -828,6 +838,13 @@ def main():
         print(f"Instructor review report: {csv_path}")
         print(f"Submissions graded: {run['submission_count']}")
         print("Final instructor scores were not assigned.")
+        execution = run.get('batch_execution', {})
+        if execution:
+            print(f"New API calls: {execution['api_calls_made']}; reused responses: {execution['reused_responses']}")
+        if run.get('unscored_submission_count'):
+            print(f"Unscored submissions needing review: {run['unscored_submission_count']}")
+            print('Valid submissions were saved. Resolve flagged responses before finalization.')
+            return
 
         print()
         print("Instructor review required before finalization.")
@@ -838,14 +855,9 @@ def main():
         print()
         print("Approve or adjust the criterion scores and final scores for each student.")
         print()
-        print("Finalization requires instructor-approved scores, so the next command")
-        print("cannot be fully generated until those scores are selected.")
-        print()
-        print("Command template:")
-        print()
-        print(
-            f'python -m ai_grader finalize-grading "{args.project_path}" '
-            f'--run {Path(run_path).name} --score Student_001=POINTS'
+        print_next_command(
+            f'python -m ai_grader generate-report "{args.project_path}" '
+            f'--run {Path(run_path).name} --open'
         )
 
     elif args.command == "recover-grading":
@@ -864,10 +876,32 @@ def main():
         if run.get('unscored_submission_count'):
             print("Invalid saved responses require correction and revalidation before finalization.")
         print("Review the saved-response provenance and feedback before approving any scores.")
+        print_next_command(
+            f'python -m ai_grader generate-report "{args.project_path}" '
+            f'--run {Path(run_path).name} --open'
+        )
+
+    elif args.command == "generate-report":
+        try:
+            report_path = generate_review_report(args.project_path, args.run)
+        except (ValueError, OSError, KeyError) as error:
+            parser.error(str(error))
+        print(f"Named instructor review report: {report_path}")
+        print("Review each submission and fill total_instructor_score, then save the CSV.")
+        print("Final scores remain unapproved until you complete the review.")
+        print_next_command(
+            f'python -m ai_grader finalize-grading "{args.project_path}" '
+            f'--run {report_path.parent.name} --scores-file "{report_path}"'
+        )
+        if args.open:
+            try:
+                open_report(report_path)
+            except (OSError, subprocess.SubprocessError) as error:
+                print(f"Report saved, but could not open it automatically: {error}")
 
     elif args.command == "finalize-grading":
-        approved_scores = {}
-        for item in args.score:
+        approved_scores = load_approved_scores(args.scores_file) if args.scores_file else {}
+        for item in args.score or []:
             student_id, score = item.split("=", 1)
             approved_scores[student_id] = float(score)
 

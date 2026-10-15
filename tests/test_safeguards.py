@@ -267,10 +267,12 @@ class EvidenceAndFilenameTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);grading_fixtures.GradingTests().make_project(root)
             response=model_response();response['criteria'][0]['deductions'][0]['rule_id']='invented'
-            with self.assertRaisesRegex(ValueError,'approved rule_id'):
-                grade_submissions(root,SimpleNamespace(responses=FakeResponses(response)))
+            run_path, _, _, run = grade_submissions(root,SimpleNamespace(responses=FakeResponses(response)))
             self.assertEqual(len(list((root/'grader/debug_responses').glob('*.json'))),1)
-            self.assertFalse((root/'grader/grading_runs').exists())
+            self.assertTrue(run_path.is_dir())
+            self.assertIsNone(run['results'][0]['total_agent_score'])
+            self.assertIn('approved rule_id', run['results'][0]['validation_error'])
+            self.assertEqual(run['unscored_submission_count'], 1)
 
     def test_empty_manifest_blocks_api_calls(self):
         with tempfile.TemporaryDirectory() as directory:

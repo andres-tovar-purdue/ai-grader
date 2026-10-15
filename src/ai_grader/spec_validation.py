@@ -42,6 +42,8 @@ def validate_scoring_totals(spec):
                     errors.append(f"{rule['rule_id']} deduction_points is outside criterion bounds.")
                 if rule.get("basis") == "filename" and not rule.get("deliverable_id"):
                     errors.append(f"{rule['rule_id']} filename rule needs a deliverable_id.")
+                if rule.get("basis") == "file_presence" and not rule.get("deliverable_id"):
+                    errors.append(f"{rule['rule_id']} file presence rule needs a deliverable_id.")
         if not math.isfinite(maximum) or maximum < 0:
             errors.append(f"{task_id} max_points must be finite and nonnegative.")
         if not math.isfinite(criterion_total) or abs(criterion_total - maximum) > 1e-6:
@@ -82,8 +84,16 @@ def validate_spec_data(spec, schema):
             if set(criterion.get("dependencies", [])) - criterion_ids:
                 raise ValueError("Unknown criterion dependency in grading specification.")
             for rule in criterion.get("deduction_rules", []):
+                if (spec.get('grading_policy', {}).get('filename_policy') == 'warning_only'
+                        and rule.get('basis') == 'filename'):
+                    raise ValueError('Warning-only filename policy cannot contain filename deduction rules.')
                 if rule.get("deliverable_id") and rule["deliverable_id"] not in deliverable_ids:
                     raise ValueError("Unknown deduction deliverable_id in grading specification.")
+                if rule.get('basis') == 'file_presence':
+                    deliverable = next(item for item in spec['deliverables']
+                                       if item['deliverable_id'] == rule['deliverable_id'])
+                    if not deliverable.get('presence_patterns'):
+                        raise ValueError('File presence rules require deliverable presence_patterns.')
     for deliverable in spec["deliverables"]:
         if set(deliverable.get("applies_to_tasks", [])) - task_ids:
             raise ValueError("Unknown deliverable task reference in grading specification.")

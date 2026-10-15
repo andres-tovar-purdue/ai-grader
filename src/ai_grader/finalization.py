@@ -22,6 +22,31 @@ FORBIDDEN_STUDENT_LANGUAGE = (
 )
 
 
+def load_approved_scores(csv_path):
+    """Read explicitly filled instructor scores; never auto-approve model scores."""
+    approved = {}
+    with Path(csv_path).open('r', encoding='utf-8-sig', newline='') as stream:
+        reader = csv.DictReader(stream)
+        if not {'student_id', 'total_instructor_score'} <= set(reader.fieldnames or []):
+            raise ValueError('Approval CSV requires student_id and total_instructor_score columns.')
+        for row in reader:
+            student_id = (row.get('student_id') or '').strip()
+            value = (row.get('total_instructor_score') or '').strip()
+            if not re.fullmatch(r'Student_[0-9]{3}', student_id):
+                raise ValueError('Invalid student_id in approval CSV.')
+            if student_id in approved:
+                raise ValueError('Duplicate student_id in approval CSV.')
+            if not value:
+                raise ValueError(f'Instructor score is blank for {student_id}; no score was auto-approved.')
+            score = float(value)
+            if not math.isfinite(score) or score < 0:
+                raise ValueError('Instructor score must be finite and nonnegative.')
+            approved[student_id] = score
+    if not approved:
+        raise ValueError('Approval CSV has no students.')
+    return approved
+
+
 def _safe_filename(value):
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_")
 
