@@ -332,6 +332,62 @@ class ProjectLocationTests(unittest.TestCase):
             self.assertNotIn("so using", output)
 
 
+class GitRepositoryTests(unittest.TestCase):
+    """init-project must never put a project, and so student data, inside git."""
+
+    def make_repository(self, root, git_file=False):
+        repo = root / "ai-grader"
+        repo.mkdir()
+        if git_file:
+            (repo / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
+        else:
+            (repo / ".git").mkdir()
+        return repo
+
+    def test_run_from_repository_stops_without_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = self.make_repository(root)
+            before = snapshot(root)
+            for args in (("demo",), ("demo", "--dry-run")):
+                code, output = run_cli(repo, *args)
+                self.assertEqual(code, 1)
+                self.assertIn("inside the git repository", output)
+                self.assertIn("Nothing was changed", output)
+                self.assertIn("Run init-project from the workspace folder", output)
+                self.assertEqual(snapshot(root), before)
+
+    def test_run_from_repository_subfolder_stops(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subfolder = self.make_repository(root, git_file=True) / "docs"
+            subfolder.mkdir()
+            before = snapshot(root)
+            with self.assertRaises(ProjectInitializationError):
+                init_project("demo", workspace_path=subfolder)
+            self.assertEqual(snapshot(root), before)
+
+    def test_existing_download_inside_repository_is_not_moved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = self.make_repository(root)
+            make_download(repo / "projects" / "demo", extra=False)
+            before = snapshot(root)
+            code, output = run_cli(repo, "demo")
+            self.assertEqual(code, 1)
+            self.assertEqual(snapshot(root), before)
+            for text in STUDENT_STRINGS:
+                self.assertNotIn(text, output)
+
+    def test_workspace_next_to_repository_is_allowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_repository(root)
+            plan = init_project("demo", workspace_path=root)
+            self.assertEqual(plan["project_path"], root.resolve() / "projects" / "demo")
+            self.assertTrue((root / "projects" / "demo").is_dir())
+
+
 class ExistingFolderTests(unittest.TestCase):
     def test_moves_brightspace_items_and_keeps_everything_else(self):
         with tempfile.TemporaryDirectory() as directory:

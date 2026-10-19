@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from ai_grader.ai_client import DEFAULT_MODEL
 from ai_grader.grading import (
-    DEFAULT_GRADING_MODEL,
     build_student_input,
     grade_submissions,
     load_grading_inputs,
@@ -214,7 +214,7 @@ class GradingTests(unittest.TestCase):
                     SimpleNamespace(responses=responses),
                 )
             self.assertEqual(run_path.name, "run_v001")
-            self.assertEqual(responses.calls[0]["model"], DEFAULT_GRADING_MODEL)
+            self.assertEqual(responses.calls[0]["model"], DEFAULT_MODEL)
             self.assertEqual(run["model"], "gpt-5.4-mini")
             self.assertEqual(run["api_usage"]["totals"]["input_tokens"], 100)
             self.assertEqual(

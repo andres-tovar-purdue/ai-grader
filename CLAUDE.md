@@ -4,15 +4,19 @@ AI Grader is a human-supervised AI grading assistant for instructors and student
 
 ## Environment
 - Windows, PowerShell. Give paste-ready PowerShell commands.
-- Workspace layout: the workspace root `C:\Users\tovara\code\ai_grader\` (not a git repo) holds `.venv\` (Python 3.13), `.env`, `projects\` and `archive\`. This repo is the `ai-grader\` subfolder of it.
-- Activate the venv before running anything. The path depends on where you are:
-  - from the workspace root: `.\.venv\Scripts\Activate.ps1`
-  - from the repo root (`ai-grader\`): `..\.venv\Scripts\Activate.ps1`
-  - from anywhere: `C:\Users\tovara\code\ai_grader\.venv\Scripts\Activate.ps1`
-- CLI: `python -m ai_grader <command>`, run from the workspace root (`init-project` creates projects under `.\projects\` relative to the current directory). Commands: init-project, prepare-project, validate, inspect, manifest, generate-spec, approve-spec, prepare-submissions, refresh-submission-checks, grade-submissions, recover-grading, generate-report, finalize-grading.
+- Layout (paths relative to the repo root, so they hold on any machine):
+  - `.venv\` and `.env` live inside the repo; git ignores both. `.env.example` is the tracked template.
+  - `..\projects\` (real course data) lives in the parent folder, outside the repo. The parent folder is the "workspace"; it is not a git repo.
+  - First-run setup: `python install.py` from the repo root creates all three. It is safe to rerun and never overwrites `.env`.
+- Activate the venv before running anything:
+  - from the repo root: `.\.venv\Scripts\Activate.ps1`
+  - from the workspace (`..`): `.\ai-grader\.venv\Scripts\Activate.ps1`
+- CLI: `python -m ai_grader <command>`, run from the workspace (`init-project` creates projects under `.\projects\` relative to the current directory, so running it from the repo root would put them inside the repo). Commands: check-setup, init-project, prepare-project, validate, inspect, manifest, generate-spec, approve-spec, prepare-submissions, refresh-submission-checks, grade-submissions, recover-grading, generate-report, finalize-grading.
+- Model: `OPENAI_MODEL` from `.env`; the single fallback is `DEFAULT_MODEL` in `ai_client.py` (use `resolve_model()`, don't add new defaults). Commands that call the model print `describe_model()` first.
 - Tests: from the repo root, `python -m unittest discover -s tests -v`. The suite mocks OpenAI and needs no API key. Run it before saying work is done.
 
 ## Layout
+- `install.py`: first-run setup (standard library only; runs before the venv exists)
 - `src/ai_grader/`: package source
 - `tests/`: unittest suite; `tests/fixtures/` holds synthetic or spec-only data
 - `prompts/`: grading and preparation instructions sent to the model

@@ -3,12 +3,11 @@ import csv
 import io
 import json
 import mimetypes
-import os
 import re
 from datetime import datetime
 from pathlib import Path
 
-from ai_grader.ai_client import get_client
+from ai_grader.ai_client import get_client, resolve_model
 from ai_grader.artifact_validation import preflight_slx_artifacts
 from ai_grader.grading_validation import (
     calculate_grading_result,
@@ -22,7 +21,6 @@ from ai_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
 SUBMISSION_MANIFEST_FILENAME = "submission_manifest.json"
 ANONYMIZED_FOLDER = "anonymized_submissions"
 GRADING_RUNS_FOLDER = "grading_runs"
-DEFAULT_GRADING_MODEL = "gpt-5.4-mini"
 TEXT_EXTENSIONS = {".m", ".py", ".bas", ".txt", ".md", ".csv", ".json", ".ipynb"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 FORBIDDEN_MANIFEST_KEYS = {
@@ -455,7 +453,7 @@ def grade_submissions(
         repository_root / "prompts" / "submission_grading_instructions.md"
     ).read_text(encoding="utf-8")
 
-    selected_model = model or os.getenv("OPENAI_MODEL") or DEFAULT_GRADING_MODEL
+    selected_model = resolve_model(model)
     results = []
     per_student_usage = []
     api_calls_made = 0

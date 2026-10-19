@@ -6,6 +6,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from ai_grader.ai_client import DEFAULT_MODEL, describe_model
 from ai_grader.finalization import finalize_grading, load_approved_scores
 from ai_grader.grading import grade_submissions
 from ai_grader.recovery import recover_grading
@@ -18,6 +19,7 @@ from ai_grader.project_manifest import write_project_manifest
 from ai_grader.project_preparation import prepare_project
 from ai_grader.repo_evidence import NO_LINK_REASONS
 from ai_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
+from ai_grader.setup_check import run_setup_checks
 from ai_grader.spec_approval import approve_grading_spec
 from ai_grader.spec_generation import generate_grading_spec
 from ai_grader.spec_validation import validate_grading_spec
@@ -343,7 +345,7 @@ def main():
         "--model",
         help=(
             "Responses API model override. Defaults to OPENAI_MODEL when set, "
-            "otherwise gpt-5.4-mini."
+            f"otherwise {DEFAULT_MODEL}."
         ),
     )
 
@@ -408,6 +410,18 @@ def main():
         help="Criterion override as Student_###:CRITERION_ID=POINTS.",
     )
 
+    # check-setup command
+    check_setup_parser = subparsers.add_parser(
+        "check-setup",
+        help="Check the virtual environment, .env, projects folder and API access."
+    )
+
+    check_setup_parser.add_argument(
+        "--skip-api",
+        action="store_true",
+        help="Do not make the test API request.",
+    )
+
     args = parser.parse_args()
 
     # command handling section
@@ -462,6 +476,7 @@ def main():
         )
 
     elif args.command == "prepare-project":
+        print(describe_model())
         result = prepare_project(args.project_path)
 
         print()
@@ -762,6 +777,7 @@ def main():
             / "grading_spec.schema.json"
         )
 
+        print(describe_model())
         output_path, spec = generate_grading_spec(
             args.project_path,
             schema_path,
@@ -984,6 +1000,7 @@ def main():
         print_next_command(f'python -m ai_grader grade-submissions "{args.project_path}"')
 
     elif args.command == "grade-submissions":
+        print(describe_model(args.model))
         run_path, json_path, csv_path, run = grade_submissions(
             args.project_path,
             model=args.model,
@@ -1088,6 +1105,24 @@ def main():
         print("Grading workflow complete.")
         print("Review the final instructor summary and student feedback before")
         print("entering grades in Brightspace.")
+
+    elif args.command == "check-setup":
+        if not args.skip_api:
+            print(describe_model())
+        checks = run_setup_checks(skip_api=args.skip_api)
+
+        print()
+        for item in checks:
+            status = "OK     " if item["ok"] else "PROBLEM"
+            print(f"  [{status}] {item['name']}: {item['detail']}")
+        print()
+
+        if not all(item["ok"] for item in checks):
+            print("Setup is incomplete. Fix the problems above, or rerun")
+            print("python install.py from the ai-grader folder.")
+            raise SystemExit(1)
+
+        print("Setup is complete.")
 
 
 if __name__ == "__main__":
