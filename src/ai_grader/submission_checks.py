@@ -9,8 +9,8 @@ from ai_grader.repo_evidence import (
 )
 from ai_grader.spec_validation import latest_spec_path, validate_grading_spec
 from ai_grader.submission_processing import (
-    anonymize_relative_path, process_submissions,
-    validate_anonymized_manifest,
+    anonymize_relative_path, identity_attempt_folders, merge_attempt_files,
+    process_submissions, validate_anonymized_manifest,
 )
 
 
@@ -60,17 +60,17 @@ def deliverable_presence_checks(submission, spec):
     return {'method': 'anonymized_file_presence_v1', 'checks': checks}
 
 
-def original_filename_checks(folder, username, full_name, spec):
-    files = sorted(path for path in Path(folder).rglob("*") if path.is_file())
+def original_filename_checks(entries, username, full_name, spec):
+    """Check original names of a student's merged files (see merge_attempt_files)."""
     checks = []
     for deliverable in spec["deliverables"]:
         patterns = deliverable.get("file_patterns", [])
         exact_paths = []
-        for index, path in enumerate(files, start=1):
-            if any(fnmatch.fnmatchcase(path.name, pattern.replace("username", username))
+        for index, entry in enumerate(entries, start=1):
+            if any(fnmatch.fnmatchcase(entry["path"].name, pattern.replace("username", username))
                    for pattern in patterns):
                 exact_paths.append(anonymize_relative_path(
-                    path.relative_to(folder), index, username, full_name).as_posix())
+                    entry["relative_path"], index, username, full_name).as_posix())
         checks.append({"deliverable_id": deliverable["deliverable_id"],
                        "status": ("exact_match" if exact_paths else "no_exact_match")
                                  if patterns else "not_checked",
@@ -104,8 +104,8 @@ def refresh_submission_checks(project_path):
         if original_files != new["files"]:
             raise RuntimeError("Original submission artifacts changed; checks were not refreshed.")
         identity = private_map[old["student_id"]]
-        folder = root / "submissions" / identity["selected_source_folder"]
-        originals = sorted(path for path in folder.rglob("*") if path.is_file())
+        entries = merge_attempt_files(identity_attempt_folders(root, identity))
+        originals = [entry["path"] for entry in entries]
         for original, file_info in zip(originals, original_files):
             copied = grader / "anonymized_submissions" / old["student_id"] / file_info["path"]
             if file_info["file_type"] == "text":
@@ -122,7 +122,7 @@ def refresh_submission_checks(project_path):
                     "Artifact content differs from the prepared submission."
                 )
         old["deliverable_checks"] = original_filename_checks(
-            folder, identity["username"], identity["full_name"], spec)
+            entries, identity["username"], identity["full_name"], spec)
     validate_anonymized_manifest(manifest, private_map)
     repository_map_path = grader / REPOSITORY_MAP_FILENAME
     if repository_map_path.is_file():

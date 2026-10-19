@@ -498,8 +498,10 @@ def owner_pattern(owner):
 
 
 def redact(text, identity, owner):
-    text = redact_identity(text, identity["username"], identity["full_name"])
-    return owner_pattern(owner).sub("<repo_owner>", text)
+    # Owner first: an owner such as "avery-gh" contains a name part, which
+    # identity redaction would otherwise rewrite before the owner is found.
+    text = owner_pattern(owner).sub("<repo_owner>", text)
+    return redact_identity(text, identity["username"], identity["full_name"])
 
 
 def redact_path(relative, identity, owner):
@@ -515,13 +517,13 @@ def redact_path(relative, identity, owner):
 
 def submission_cutoff(identity):
     """
-    The student's submission time from the selected Brightspace attempt, as
+    The student's submission time from the newest Brightspace attempt, as
     an aware datetime at the end of that minute, or None if unknown.
 
     Brightspace folder names give local time to the minute; the machine's
     time zone is assumed.
     """
-    selected = identity.get("selected_source_folder")
+    selected = identity.get("newest_source_folder")
     for attempt in identity.get("attempts", []):
         if attempt.get("source_folder") == selected and attempt.get("submitted_at"):
             submitted = datetime.fromisoformat(attempt["submitted_at"])

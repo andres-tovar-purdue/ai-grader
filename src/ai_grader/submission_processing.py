@@ -178,6 +178,49 @@ def identity_variants(value):
     }, key=len, reverse=True)
 
 
+PLACEHOLDERS = ("<student_name>", "<username>", "<repo_owner>")
+# A letter in any script; digits, underscores, spaces and punctuation are not.
+LETTER = r"[^\W\d_]"
+
+
+def name_parts(full_name):
+    """
+    The separate words of a full name (split at spaces and hyphens), for
+    redacting a first name or surname that appears alone. Parts with fewer
+    than two letters, such as a middle initial, are left out.
+    """
+
+    if not full_name:
+        return []
+    parts = {part for part in re.split(r"[\s\-]+", full_name)
+             if sum(character.isalpha() for character in part) >= 2}
+    # Longest first, so a longer part wins over one it contains.
+    return sorted(parts, key=lambda part: (-len(part), part))
+
+
+def redact_name_parts(text, full_name):
+    """
+    Replace each name part as a whole token, ignoring case: a letter on
+    either side means no match, so "Chen" leaves "kitchen" alone, while
+    "chen_prj1.ipynb" and "Chen," are redacted. Placeholders already in the
+    text are kept as they are.
+    """
+
+    parts = name_parts(full_name)
+    if not parts:
+        return text
+    pattern = re.compile(
+        "(" + "|".join(re.escape(item) for item in PLACEHOLDERS) + ")"
+        + f"|(?<!{LETTER})(?:" + "|".join(re.escape(part) for part in parts)
+        + f")(?!{LETTER})",
+        re.IGNORECASE,
+    )
+    return pattern.sub(
+        lambda match: match.group(1) or "<student_name>",
+        text,
+    )
+
+
 def redact_identity(text, username, full_name):
     """Replace known identity strings in agent-facing text."""
     replacements = (
@@ -192,7 +235,8 @@ def redact_identity(text, username, full_name):
                 text,
                 flags=re.IGNORECASE,
             )
-    return text
+    # A first name or surname on its own, e.g. "<surname>_prj1_2.ipynb".
+    return redact_name_parts(text, full_name)
 
 
 def anonymize_relative_path(relative_path, index, username, full_name):
@@ -208,25 +252,63 @@ def anonymize_relative_path(relative_path, index, username, full_name):
     return Path(*parts)
 
 
+def merge_attempt_files(attempt_folders):
+    """
+    Return one student's submission files, merged across Brightspace
+    attempts given oldest first.
+
+    Every file of every attempt is included. When the same relative path
+    (ignoring case) is in more than one attempt, the newest attempt's copy is
+    kept. Entries are sorted by relative path, which fixes the artifact
+    numbering; each holds the file's path, relative_path, attempt (1 is the
+    oldest), source_folder and replaced_attempts (older attempts whose copy
+    it replaced).
+    """
+
+    merged = {}
+    for attempt_number, folder in enumerate(attempt_folders, start=1):
+        folder = Path(folder)
+        for path in sorted(item for item in folder.rglob("*") if item.is_file()):
+            relative_path = path.relative_to(folder)
+            key = relative_path.as_posix().casefold()
+            earlier = merged.get(key)
+            merged[key] = {
+                "path": path,
+                "relative_path": relative_path,
+                "attempt": attempt_number,
+                "source_folder": folder.name,
+                "replaced_attempts": (
+                    earlier["replaced_attempts"] + [earlier["attempt"]]
+                    if earlier else []
+                ),
+            }
+    return sorted(merged.values(), key=lambda entry: entry["relative_path"])
+
+
+def identity_attempt_folders(project_path, identity):
+    """A student's Brightspace attempt folders, oldest first, from student_map.json."""
+
+    submissions_path = Path(project_path) / "submissions"
+    return [submissions_path / attempt["source_folder"]
+            for attempt in identity["attempts"]]
+
+
 def inventory_submission_files(
-    student_folder,
+    entries,
     username,
     full_name,
     destination_folder=None,
 ):
     """
-    Inventory files contained in one Brightspace submission folder.
+    Inventory a student's merged submission files (see merge_attempt_files).
     """
 
     files = []
 
-    for index, path in enumerate(
-        (path for path in sorted(student_folder.rglob("*")) if path.is_file()),
-        start=1,
-    ):
-        source_relative_path = path.relative_to(student_folder)
+    for index, entry in enumerate(entries, start=1):
+        path = entry["path"]
         relative_path = anonymize_relative_path(
-            source_relative_path,
+            entry["relative_path"],
             index,
             username,
             full_name,
@@ -269,8 +351,8 @@ def inventory_submission_files(
 def process_submissions(project_path, anonymized_root=None):
     """
     Parse Brightspace submission folders, group multiple attempts
-    by Purdue username, select the latest submission, and assign
-    anonymized student IDs.
+    by Purdue username, merge each student's attempts (newest copy of
+    a file wins), and assign anonymized student IDs.
 
     Returns:
         submissions:
@@ -278,7 +360,8 @@ def process_submissions(project_path, anonymized_root=None):
 
         student_map:
             Local-only mapping containing username, full name,
-            Brightspace folder names, and attempt metadata.
+            Brightspace folder names, attempt metadata, and the attempt
+            each file came from.
     """
 
     project_path = Path(project_path).resolve()
@@ -343,16 +426,22 @@ def process_submissions(project_path, anonymized_root=None):
             )
         )
 
-        selected_attempt = attempts[-1]
+        # The newest attempt gives the submission time and the name.
+        newest_attempt = attempts[-1]
 
         destination_folder = None
         if anonymized_root is not None:
             destination_folder = Path(anonymized_root) / student_id
 
+        entries = merge_attempt_files(
+            attempt["folder"] for attempt in attempts
+        )
+        files_replaced = sum(1 for entry in entries if entry["replaced_attempts"])
+
         files = inventory_submission_files(
-            selected_attempt["folder"],
+            entries,
             username,
-            selected_attempt["full_name"],
+            newest_attempt["full_name"],
             destination_folder,
         )
 
@@ -362,12 +451,22 @@ def process_submissions(project_path, anonymized_root=None):
             review_flags.append(
                 f"Multiple submissions detected: "
                 f"{len(attempts)} attempts. "
-                f"Latest attempt selected."
+                f"Files from all attempts were merged; "
+                f"{files_replaced} file(s) present in more than one attempt "
+                f"use the newest copy."
             )
 
-        if selected_attempt["submitted_at"] is None:
+        unparsed_times = sum(
+            1 for attempt in attempts if attempt["submitted_at"] is None
+        )
+        if newest_attempt["submitted_at"] is None:
             review_flags.append(
                 "Submission timestamp could not be parsed."
+            )
+        elif unparsed_times:
+            review_flags.append(
+                f"{unparsed_times} attempt timestamp(s) could not be parsed; "
+                "those attempts were treated as the oldest."
             )
 
         # Agent-safe record.
@@ -375,7 +474,7 @@ def process_submissions(project_path, anonymized_root=None):
             {
                 "student_id": student_id,
                 "attempt_count": len(attempts),
-                "selected_attempt": len(attempts),
+                "files_replaced_by_newer_attempts": files_replaced,
                 "file_count": len(files),
                 "files": files,
                 "review_flags": review_flags,
@@ -385,9 +484,9 @@ def process_submissions(project_path, anonymized_root=None):
         # Private local mapping.
         student_map[student_id] = {
             "username": username,
-            "full_name": selected_attempt["full_name"],
-            "selected_source_folder": (
-                selected_attempt["folder_name"]
+            "full_name": newest_attempt["full_name"],
+            "newest_source_folder": (
+                newest_attempt["folder_name"]
             ),
             "attempt_count": len(attempts),
             "attempts": [
@@ -400,6 +499,17 @@ def process_submissions(project_path, anonymized_root=None):
                     ),
                 }
                 for attempt in attempts
+            ],
+            # Which attempt each anonymized file came from.
+            "files": [
+                {
+                    "artifact_path": file_info["path"],
+                    "original_path": entry["relative_path"].as_posix(),
+                    "attempt": entry["attempt"],
+                    "source_folder": entry["source_folder"],
+                    "replaced_attempts": entry["replaced_attempts"],
+                }
+                for entry, file_info in zip(entries, files)
             ],
         }
 
@@ -418,7 +528,7 @@ def validate_anonymized_manifest(manifest, student_map):
     for student in student_map.values():
         forbidden.extend(identity_variants(student["username"]))
         forbidden.extend(identity_variants(student["full_name"]))
-        forbidden.append(student["selected_source_folder"])
+        forbidden.append(student["newest_source_folder"])
         forbidden.extend(
             attempt["source_folder"]
             for attempt in student["attempts"]
@@ -601,7 +711,7 @@ def write_submission_manifest(project_path):
             for submission in submissions:
                 identity = student_map[submission["student_id"]]
                 submission["deliverable_checks"] = original_filename_checks(
-                    project_path / "submissions" / identity["selected_source_folder"],
+                    merge_attempt_files(identity_attempt_folders(project_path, identity)),
                     identity["username"], identity["full_name"], spec,
                 )
 

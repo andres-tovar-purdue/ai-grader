@@ -503,7 +503,7 @@ After the grading specification is approved, run:
 python -m ai_grader prepare-submissions .\projects\PROJECT_ID
 ```
 
-AI Grader processes the Brightspace submission folders, groups multiple attempts by username, selects the latest parsed attempt, assigns anonymized IDs such as `Student_001`, `Student_002`, and `Student_003`, and creates:
+AI Grader processes the Brightspace submission folders, groups multiple attempts by username, merges each student's attempts (see below), assigns anonymized IDs such as `Student_001`, `Student_002`, and `Student_003`, and creates:
 
 ```text
 grader\
@@ -523,9 +523,19 @@ grader\
 
 The `anonymized_submissions\` folders are physical agent-facing copies of the selected student submissions.
 
-Known student usernames and names are redacted from text and filenames. Image pixels are **not** redacted. Screenshots and other submitted images may still contain visible identity information and may require instructor review.
+Known student usernames and names are redacted from text and filenames, including a first name or surname that appears on its own (for example, a notebook named after the student's surname). Each part of the name is matched as a whole word, ignoring case: digits, underscores, spaces and punctuation count as word boundaries, but letters do not, so a surname such as Chen is redacted in `chen_prj1.ipynb` but not inside `kitchen`. Parts with fewer than two letters, such as a middle initial, are not redacted on their own. A first name that is also an ordinary word (for example, Will or May) is redacted wherever that word appears in the student's files. Image pixels are **not** redacted. Screenshots and other submitted images may still contain visible identity information and may require instructor review.
 
 AI Grader validates the anonymized manifest before grading.
+
+### Students with several attempts
+
+Brightspace creates one folder per attempt. AI Grader builds each student's submission from **all** of their attempts: every file from every attempt is included, and when the same file (the same relative path, ignoring case) appears in more than one attempt, the copy from the newest attempt is used. A student whose last attempt re-uploaded only the PDF therefore keeps the notebook, script and data files from earlier attempts.
+
+- The newest attempt's time is the submission time, including for the GitHub repository snapshot.
+- `student_map.json` (private) records, for each anonymized file, its original path, the attempt and Brightspace folder it came from, and which older attempts it replaced.
+- `submission_manifest.json` records only counts: the number of attempts and how many files were replaced by a newer attempt. The student is flagged for review.
+- `prepare-submissions` prints the same counts per student, by anonymous ID only, for example `Student_003: 3 attempts merged, 2 file(s) replaced by a newer attempt`.
+- If an attempt's time cannot be read from its folder name, that attempt is treated as the oldest, and the student is flagged.
 
 You can rerun `prepare-submissions` until grading starts, for example after adding a late submission. It builds and validates the new output first, then replaces the earlier `anonymized_submissions\`, `submission_manifest.json`, `student_map.json` and repository evidence. Once grading has started (anything in `grader\grading_runs\` or `grader\debug_responses\`), it refuses and changes nothing, because those files refer to the current `Student_###` numbers.
 
