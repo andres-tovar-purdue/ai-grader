@@ -276,6 +276,58 @@ projects\
 
 The command also prints the next recommended step.
 
+### Starting from a Brightspace download
+
+You can also create `projects\PROJECT_ID\` yourself, drop the Brightspace download into it, and run the same command. The download can be:
+
+- the Brightspace ZIP itself;
+- its extracted submission folders, placed directly in the project folder; or
+- the folder that Windows "Extract All" creates next to the ZIP.
+
+AI Grader then completes the existing folder:
+
+- creates any missing standard folders and leaves existing ones untouched;
+- extracts the Brightspace ZIP and keeps the ZIP where it is;
+- moves the Brightspace submission folders (names that begin `<digits>-<digits> - `) and Brightspace's `index.html` into `submissions\`, and removes the Windows extraction folder once it is empty;
+- leaves every other file where it is and lists it as "not moved".
+
+A ZIP counts as a Brightspace download when it contains `index.html` or submission folders at its top level. Other ZIP files, such as a zipped dataset, are left alone. Files in the Brightspace ZIP that are neither submission folders nor `index.html` are not extracted; AI Grader reports how many there are.
+
+Preview the changes first with `--dry-run`:
+
+```powershell
+python -m ai_grader init-project mspe_49600_fa26_pr01 --dry-run
+```
+
+Example output:
+
+```text
+Dry run: nothing was changed.
+
+Existing project folder: C:\Users\<username>\code\ai_grader\projects\mspe_49600_fa26_pr01
+
+Would create folders:
+  - project\
+  - datasets\
+  - rubric\
+  - reference\
+  - submissions\
+  - grader\
+
+Would extract from Brightspace ZIP into submissions\: 5 submission folders, 1 index.html
+  - Project 1 Download Oct 18, 2026.zip (kept)
+```
+
+Then run the command again without `--dry-run` to apply the changes.
+
+AI Grader reports counts only and never prints student names. Everything runs locally: AI Grader reads the Brightspace ZIP to extract it, and when the same submission exists in two places it compares their contents locally. Nothing is sent to the AI model at this stage.
+
+Running the command again is safe. Submissions already in `submissions\` with the same file names and identical contents (compared by SHA-256 checksum) are reported as "Already in submissions\ (skipped)", so a kept ZIP is not extracted twice. If an earlier run was interrupted, running it again finishes the remaining items.
+
+Nothing is overwritten. If `submissions\` already holds a different folder or `index.html` with the same name, or if the ZIP and an extracted copy of the same submission differ, the command stops before changing anything and reports how many items clash. Compare them with `submissions\`, remove or rename the duplicates, then run the command again. The command also stops without changes if the ZIP is password-protected, contains unsafe file paths, or needs more disk space than is free.
+
+Files whose names follow the Brightspace pattern but are not folders are left in place and counted rather than listed by name.
+
 ---
 
 ## 11. Add the Project Inputs
@@ -312,7 +364,7 @@ For project preparation, smaller CSV files can be supplied to the model in full;
 
 ### `submissions\`
 
-Place the extracted Brightspace student submission folders here.
+Place the extracted Brightspace student submission folders here. If you put the Brightspace ZIP or its extracted folders in the project folder itself, `init-project` can extract or move them here for you (see Section 10).
 
 The expected folder format is the format produced by Brightspace downloads, for example:
 
@@ -704,7 +756,7 @@ Display the available commands.
 python -m ai_grader init-project PROJECT_ID
 ```
 
-Create a new local grading project.
+Create a new local grading project, or complete an existing project folder that holds a Brightspace ZIP or its extracted folders. Add `--dry-run` to preview the changes without making them.
 
 ```text
 python -m ai_grader inspect PROJECT_PATH
