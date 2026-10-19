@@ -1,3 +1,4 @@
+import codecs
 import hashlib
 import json
 import re
@@ -61,15 +62,41 @@ def classify_file(path):
     return "other"
 
 
+# Longest first: the UTF-32 LE mark starts with the UTF-16 LE mark. UTF-8
+# (with or without a BOM) keeps the previous decoding, so manifests prepared
+# before this change still match on refresh-submission-checks.
+TEXT_BYTE_ORDER_MARKS = (
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
+
+
+def decode_text(data):
+    """
+    Decode text bytes, honouring a byte-order mark.
+
+    Windows tools such as PowerShell's ">" write UTF-16 with a BOM; reading
+    those as UTF-8 would turn every character into a replacement character.
+    Without a BOM, text is read as UTF-8. Line endings are translated to
+    "\\n" exactly as Python's text mode (universal newlines) does.
+    """
+    encoding = "utf-8"
+    for mark, candidate in TEXT_BYTE_ORDER_MARKS:
+        if data.startswith(mark):
+            encoding = candidate
+            break
+    text = data.decode(encoding, errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def read_text_file(path):
     """
     Read a text-based submission file.
     """
 
-    return path.read_text(
-        encoding="utf-8",
-        errors="replace",
-    )
+    return decode_text(path.read_bytes())
 
 
 def parse_brightspace_folder_name(folder_name):
@@ -484,8 +511,21 @@ def write_submission_manifest(project_path):
             f"{anonymized_path}"
         )
 
+    from ai_grader.repo_evidence import REPOSITORY_CURRENT_FOLDER
+    current_path = grader_path / REPOSITORY_CURRENT_FOLDER
+    if current_path.exists():
+        raise FileExistsError(
+            "Refusing to overwrite the kept current repository state: "
+            f"{current_path}"
+        )
+
     temporary_path = Path(tempfile.mkdtemp(
         prefix=".anonymized_submissions_",
+        dir=grader_path,
+    ))
+    # Current repository states (not graded) are staged the same way.
+    current_temporary = Path(tempfile.mkdtemp(
+        prefix=".repository_current_",
         dir=grader_path,
     ))
 
@@ -514,6 +554,14 @@ def write_submission_manifest(project_path):
                     identity["username"], identity["full_name"], spec,
                 )
 
+        from ai_grader.repo_evidence import (
+            attach_repository_evidence, verify_repository_redaction,
+        )
+        repository_summary, repository_map = attach_repository_evidence(
+            project_path, submissions, student_map, temporary_path,
+            current_temporary,
+        )
+
         manifest = {
             "manifest_version": "2.0",
             "anonymization": {
@@ -534,12 +582,28 @@ def write_submission_manifest(project_path):
             ],
             "submissions": submissions,
         }
+        if repository_summary is not None:
+            manifest["repository_evidence"] = repository_summary
 
         validate_anonymized_manifest(manifest, student_map)
-        publish_anonymized_tree(temporary_path, anonymized_path)
+        if repository_map is not None:
+            verify_repository_redaction(manifest, repository_map)
+        # Publish the ungraded current state first, and undo it if the graded
+        # tree fails, so a failed run leaves nothing that blocks a rerun.
+        if any(current_temporary.iterdir()):
+            publish_anonymized_tree(current_temporary, current_path)
+        else:
+            current_temporary.rmdir()
+        try:
+            publish_anonymized_tree(temporary_path, anonymized_path)
+        except Exception:
+            if current_path.exists():
+                shutil.rmtree(current_path)
+            raise
     except Exception:
-        if temporary_path.exists():
-            shutil.rmtree(temporary_path)
+        for staging in (temporary_path, current_temporary):
+            if staging.exists():
+                shutil.rmtree(staging)
         raise
 
     manifest_path = (
@@ -573,6 +637,13 @@ def write_submission_manifest(project_path):
             indent=2,
         )
         file.write("\n")
+
+    if repository_map is not None:
+        # Private, like student_map.json: repository owners and URLs.
+        from ai_grader.repo_evidence import REPOSITORY_MAP_FILENAME
+        (grader_path / REPOSITORY_MAP_FILENAME).write_text(
+            json.dumps(repository_map, indent=2) + "\n", encoding="utf-8",
+        )
 
     return (
         manifest_path,

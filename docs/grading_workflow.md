@@ -34,4 +34,4 @@ The agent works with Student_### IDs. Names and usernames appear only in locally
 5. Agreement summary and rubric-change impact (stage 5).
 6. Spec plain-language summary/diff (stage 3); `inspect --json` (status).
 7. Due date / late policy (stage 1).
-Plus, for MSPE 49600: `check-github-repos`. For MSPE 29800: Excel/PDF content extraction.
+Plus, for MSPE 49600: ~~`check-github-repos`~~ done generically: `prepare-submissions` collects GitHub repositories linked in `index.html` as evidence (facts + files). For MSPE 29800: Excel/PDF content extraction.
