@@ -418,6 +418,10 @@ def main():
             print(error)
             raise SystemExit(1)
 
+        if plan.get("location_note"):
+            print()
+            print(plan["location_note"])
+
         project_path = plan["project_path"]
         placed_count = sum(
             sum(count_items(plan, action))

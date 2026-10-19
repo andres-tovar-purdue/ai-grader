@@ -276,6 +276,8 @@ projects\
 
 The command also prints the next recommended step.
 
+If you run the command from inside `projects\` or from inside the project folder itself, AI Grader uses that folder instead of creating `projects\projects\PROJECT_ID`, and says which folder it used. You can also pass the name as a path such as `projects\PROJECT_ID`. If a folder named `PROJECT_ID` sits in the current folder but not in `projects\`, the command stops without changing anything and asks you to move it into `projects\` first.
+
 ### Starting from a Brightspace download
 
 You can also create `projects\PROJECT_ID\` yourself, drop the Brightspace download into it, and run the same command. The download can be:

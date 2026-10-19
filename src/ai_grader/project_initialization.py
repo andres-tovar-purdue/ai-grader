@@ -380,6 +380,74 @@ def extract_zip_items(plan, zip_record, submissions_path, done, total):
     return done
 
 
+def is_projects_folder(path):
+    return path.name.lower() == "projects"
+
+
+def resolve_project_path(project_name, current_path):
+    """
+    Return (project folder, note) for init-project, so that running it from
+    the wrong folder never creates projects\\projects\\NAME or NAME\\projects\\NAME.
+
+    - From the workspace root: projects\\NAME (the normal case, no note).
+    - From inside projects\\: .\\NAME.
+    - From inside projects\\NAME itself: the current folder.
+    - A path such as projects\\NAME: used as given if its parent is projects\\.
+    Stops instead of guessing when the intent is unclear.
+    """
+
+    current_path = Path(current_path).resolve()
+    name_path = Path(project_name)
+    parts = name_path.parts
+
+    if not parts or project_name.strip() in {".", ".."}:
+        raise ProjectInitializationError(
+            "Give a project name, for example: init-project mspe_49600_fa26_pr01"
+        )
+
+    if name_path.is_absolute() or len(parts) > 1:
+        candidate = (current_path / name_path).resolve()
+        if is_projects_folder(candidate.parent):
+            return candidate, f"Using the project folder given as a path: {candidate}"
+        raise ProjectInitializationError(
+            f"{project_name} is a path, and its folder is not inside a projects "
+            "folder. Run init-project from the workspace root with just the "
+            f"project name, for example: init-project {name_path.name}"
+        )
+
+    if is_projects_folder(current_path):
+        candidate = current_path / project_name
+        nested = current_path / "projects" / project_name
+        if nested.exists():
+            raise ProjectInitializationError(
+                "Stopped: you are inside a projects folder, and both "
+                f"{candidate} and {nested} could be meant. Nothing was changed. "
+                "Run init-project from the workspace root instead."
+            )
+        return candidate, (
+            f"Running inside the projects folder, so using: {candidate}"
+        )
+
+    if (current_path.name == project_name
+            and is_projects_folder(current_path.parent)):
+        return current_path, (
+            f"Running inside the project folder, so using it: {current_path}"
+        )
+
+    project_path = current_path / "projects" / project_name
+    stray = current_path / project_name
+
+    if stray.is_dir() and not project_path.exists():
+        raise ProjectInitializationError(
+            f"Stopped: found a folder named {project_name} here ({stray}), but "
+            f"projects belong in {project_path}. Nothing was changed. Move the "
+            f"folder into {current_path / 'projects'}, then rerun init-project. "
+            "If you meant to start a separate new project, choose a different name."
+        )
+
+    return project_path, None
+
+
 def init_project(project_name, workspace_path=None, dry_run=False):
     """
     Create a grading project beneath the workspace projects folder, or
@@ -401,10 +469,10 @@ def init_project(project_name, workspace_path=None, dry_run=False):
     if workspace_path is None:
         workspace_path = Path.cwd()
 
-    workspace_path = Path(workspace_path).resolve()
-    project_path = workspace_path / "projects" / project_name
+    project_path, note = resolve_project_path(project_name, workspace_path)
 
     plan = plan_project_initialization(project_path)
+    plan["location_note"] = note
 
     if dry_run:
         return plan

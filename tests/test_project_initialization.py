@@ -237,6 +237,96 @@ class NewProjectTests(unittest.TestCase):
             self.assertFalse((root / "projects").exists())
 
 
+class ProjectLocationTests(unittest.TestCase):
+    """Running from the wrong folder must never nest projects\\projects\\NAME."""
+
+    def test_inside_projects_folder_uses_existing_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            projects = Path(directory) / "projects"
+            make_download(projects / "demo", extra=False)
+            code, output = run_cli(projects, "demo")
+            self.assertEqual(code, 0, output)
+            self.assertFalse((projects / "projects").exists())
+            self.assertIn("Running inside the projects folder, so using:", output)
+            self.assertEqual(len(list((projects / "demo" / "submissions").iterdir())), 4)
+
+    def test_inside_projects_folder_creates_new_project_there(self):
+        with tempfile.TemporaryDirectory() as directory:
+            projects = Path(directory) / "projects"
+            projects.mkdir()
+            plan = init_project("demo", workspace_path=projects)
+            self.assertEqual(plan["project_path"], projects.resolve() / "demo")
+            self.assertFalse((projects / "projects").exists())
+            self.assertEqual(sorted(p.name for p in (projects / "demo").iterdir()),
+                             sorted(PROJECT_SUBFOLDERS))
+
+    def test_inside_the_project_folder_uses_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "projects" / "demo"
+            make_download(project, extra=False)
+            code, output = run_cli(project, "demo")
+            self.assertEqual(code, 0, output)
+            self.assertFalse((project / "projects").exists())
+            self.assertIn("Running inside the project folder, so using it:", output)
+            self.assertTrue((project / "submissions" / "index.html").is_file())
+
+    def test_name_given_as_projects_path_is_used(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = init_project(str(Path("projects") / "demo"), workspace_path=root)
+            self.assertEqual(plan["project_path"], root.resolve() / "projects" / "demo")
+            self.assertFalse((root / "projects" / "projects").exists())
+
+    def test_path_outside_a_projects_folder_stops(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            before = snapshot(root)
+            code, output = run_cli(root, str(Path("elsewhere") / "demo"))
+            self.assertEqual(code, 1)
+            self.assertIn("not inside a projects folder", output)
+            self.assertEqual(snapshot(root), before)
+
+    def test_stray_folder_with_same_name_stops_without_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            make_download(root / "demo", extra=False)
+            before = snapshot(root)
+            for args in (("demo",), ("demo", "--dry-run")):
+                code, output = run_cli(root, *args)
+                self.assertEqual(code, 1)
+                self.assertIn("found a folder named demo here", output)
+                self.assertIn("Nothing was changed", output)
+                self.assertEqual(snapshot(root), before)
+            for text in STUDENT_STRINGS:
+                self.assertNotIn(text, output)
+
+    def test_stray_folder_is_ignored_when_project_already_exists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "demo").mkdir()
+            (root / "projects" / "demo").mkdir(parents=True)
+            plan = init_project("demo", workspace_path=root)
+            self.assertEqual(plan["project_path"], root.resolve() / "projects" / "demo")
+            self.assertEqual(list((root / "demo").iterdir()), [])
+
+    def test_ambiguous_inside_projects_stops(self):
+        with tempfile.TemporaryDirectory() as directory:
+            projects = Path(directory) / "projects"
+            (projects / "projects" / "demo").mkdir(parents=True)
+            before = snapshot(Path(directory))
+            with self.assertRaises(ProjectInitializationError):
+                init_project("demo", workspace_path=projects)
+            self.assertEqual(snapshot(Path(directory)), before)
+
+    def test_workspace_root_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            code, output = run_cli(root, "demo")
+            self.assertEqual(code, 0)
+            self.assertTrue((root / "projects" / "demo" / "grader").is_dir())
+            self.assertNotIn("so using", output)
+
+
 class ExistingFolderTests(unittest.TestCase):
     def test_moves_brightspace_items_and_keeps_everything_else(self):
         with tempfile.TemporaryDirectory() as directory:
