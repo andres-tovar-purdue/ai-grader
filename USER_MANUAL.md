@@ -544,6 +544,33 @@ Known student usernames and names are redacted from text and filenames. Image pi
 
 AI Grader validates the anonymized manifest before grading.
 
+### GitHub repositories linked in submissions
+
+If students submit a link to a GitHub repository, for example in the Brightspace submission text, `prepare-submissions` also collects the repository as evidence. This happens only when Brightspace's `submissions\index.html` contains GitHub repository links; otherwise nothing changes.
+
+For each link, AI Grader:
+
+1. matches the entry in `index.html` to a student through the private student map. An entry that names no student, or more than one, is skipped and counted;
+2. clones the repository **without credentials**: no saved Git credentials, no SSH keys, no Git configuration from your account, and no login prompts. Only public repositories can be fetched;
+3. copies the repository's tracked files into the student's folder under `github_repo\`, with the same name redaction as other submission files. The repository owner is redacted too. Files inside tracked environment folders such as `.venv` are not copied, and very large files are skipped;
+4. writes a facts file for the student, for example `artifact_005_github_repo_facts.json`, with objective information:
+   - whether the repository was publicly reachable, and why not if it wasn't (not public or not found, network error, timeout);
+   - the repository name (redacted);
+   - the list of tracked files;
+   - the number of commits, with each commit's date and message;
+   - whether `.venv` or other environment folders are tracked, and how many files they contain.
+
+The facts file and the repository files are passed to grading as evidence, like any other submission file. Whether a fact affects the grade is decided by the approved grading specification, not by AI Grader.
+
+`prepare-submissions` reports how many students had repository links and how many repositories were fetched. Repository owners and URLs are saved in `grader\repository_map.json`, which is private like `student_map.json`.
+
+Limitations:
+
+- Only public GitHub repositories on `github.com` are supported. Private repositories are recorded as not publicly reachable.
+- The repository is fetched as it is when you run `prepare-submissions`, not as it was at the deadline. Commit dates in the facts file show when work was committed.
+- AI Grader redacts known names, usernames and the repository owner. A different GitHub username inside a repository name, file or commit message cannot be detected.
+- Fetching needs Git to be installed and an internet connection.
+
 ---
 
 ## 19. Review Submission Preparation
@@ -968,7 +995,7 @@ Do not copy course projects, student submissions, grading reports, `student_map.
 
 It is required later for finalization, but it is not intended for AI grading.
 
-Keep it local and private.
+Keep it local and private. The same applies to `repository_map.json`, which AI Grader creates when submissions link to GitHub repositories; it lists each student's repository owner and URL.
 
 ---
 

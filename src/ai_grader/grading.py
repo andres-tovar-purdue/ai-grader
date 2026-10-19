@@ -300,9 +300,19 @@ def build_student_input(spec, submission, student_root, instructions):
 
                 text = "\n\n".join(sections)
 
+            if file_info.get("source") == "github_repository":
+                # Facts files sit at the student root; repository files are
+                # inside a github_repo folder.
+                evidence_type = ("github_repository_facts"
+                                 if "/" not in relative_path
+                                 else "github_repository_file")
+            elif extension == ".ipynb":
+                evidence_type = "notebook_source_and_saved_outputs"
+            else:
+                evidence_type = "source_code"
             text_sections.append(
                 f"ARTIFACT: {relative_path}\n"
-                f"EVIDENCE TYPE: {'notebook_source_and_saved_outputs' if extension == '.ipynb' else 'source_code'}\n"
+                f"EVIDENCE TYPE: {evidence_type}\n"
                 f"{text}"
             )
         elif extension in IMAGE_EXTENSIONS:

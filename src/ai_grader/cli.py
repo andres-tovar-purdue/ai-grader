@@ -933,6 +933,26 @@ def main():
             )
             print("Review the submission manifest before grading.")
 
+        repositories = manifest.get("repository_evidence")
+        if repositories:
+            print()
+            print("GitHub repositories linked in submissions\\index.html:")
+            print(f"  Students with repository links: "
+                  f"{repositories['students_with_repository_urls']}")
+            print(f"  Students without repository links: "
+                  f"{repositories['students_without_repository_urls']}")
+            for status, count in repositories["fetch_status_counts"].items():
+                print(f"  {status.replace('_', ' ')}: {count}")
+            unmatched = repositories["index_blocks_not_matched_to_a_student"]
+            if unmatched:
+                print(f"  Warning: {unmatched} index.html entr"
+                      f"{'y' if unmatched == 1 else 'ies'} with repository links "
+                      "could not be matched to exactly one student; their "
+                      "repositories were not fetched.")
+            print("  Repository facts and files are in each student's "
+                  "anonymized folder; owners and URLs are kept privately in "
+                  "grader\\repository_map.json.")
+
         print()
         print("Review before grading:")
         print(f"  - {manifest_path}")

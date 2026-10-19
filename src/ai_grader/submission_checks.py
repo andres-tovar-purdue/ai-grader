@@ -4,6 +4,9 @@ import hashlib
 import json
 from pathlib import Path
 
+from ai_grader.repo_evidence import (
+    REPOSITORY_MAP_FILENAME, REPOSITORY_SOURCE, verify_repository_redaction,
+)
 from ai_grader.spec_validation import latest_spec_path, validate_grading_spec
 from ai_grader.submission_processing import (
     anonymize_relative_path, process_submissions,
@@ -94,12 +97,16 @@ def refresh_submission_checks(project_path):
     fresh_by_id = {item["student_id"]: item for item in fresh}
     for old in manifest["submissions"]:
         new = fresh_by_id[old["student_id"]]
-        if old["files"] != new["files"]:
+        # Repository evidence was fetched separately; compare only the files
+        # that came from the Brightspace submission folder.
+        original_files = [file_info for file_info in old["files"]
+                          if file_info.get("source") != REPOSITORY_SOURCE]
+        if original_files != new["files"]:
             raise RuntimeError("Original submission artifacts changed; checks were not refreshed.")
         identity = private_map[old["student_id"]]
         folder = root / "submissions" / identity["selected_source_folder"]
         originals = sorted(path for path in folder.rglob("*") if path.is_file())
-        for original, file_info in zip(originals, old["files"]):
+        for original, file_info in zip(originals, original_files):
             copied = grader / "anonymized_submissions" / old["student_id"] / file_info["path"]
             if file_info["file_type"] == "text":
                 # Preparation writes text using platform-native newlines. Compare
@@ -117,6 +124,10 @@ def refresh_submission_checks(project_path):
         old["deliverable_checks"] = original_filename_checks(
             folder, identity["username"], identity["full_name"], spec)
     validate_anonymized_manifest(manifest, private_map)
+    repository_map_path = grader / REPOSITORY_MAP_FILENAME
+    if repository_map_path.is_file():
+        verify_repository_redaction(
+            manifest, json.loads(repository_map_path.read_text(encoding="utf-8")))
     backup = manifest_path.with_name("submission_manifest.before_checks.json")
     if not backup.exists():
         backup.write_bytes(manifest_path.read_bytes())
