@@ -119,7 +119,9 @@ class ReportingTests(unittest.TestCase):
 
     def test_cli_generates_opens_and_prints_next_command_without_api(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            # Resolve so the expected path matches the CLI's resolved path even
+            # when TEMP uses a Windows short name (e.g. RUNNER~1 on CI).
+            root = Path(directory).resolve()
             self.prepare(root)
             output = io.StringIO()
             with patch("sys.argv", ["ai_grader", "generate-report", str(root), "--run", "run_v004", "--open"]), \
