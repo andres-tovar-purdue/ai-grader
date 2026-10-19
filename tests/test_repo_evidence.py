@@ -562,13 +562,29 @@ class PrepareSubmissionsTests(unittest.TestCase):
                     self.assertEqual([f["path"] for f in submission["files"]],
                                      ["artifact_001_analysis.py"])
 
-    def test_refuses_to_overwrite_kept_current_state(self):
+    def test_rerun_before_grading_replaces_kept_current_state(self):
         with tempfile.TemporaryDirectory() as directory:
-            fixture = RepositoryProject(directory)
-            (fixture.project / "grader/repository_current").mkdir()
-            with NoNetwork(fixture), self.assertRaises(FileExistsError):
+            fixture, first, _ = prepare(directory)
+            stale = fixture.project / "grader/repository_current/stale.txt"
+            stale.write_text("from an earlier preparation\n", encoding="utf-8")
+            with NoNetwork(fixture):
+                _, _, second = write_submission_manifest(fixture.project)
+            self.assertFalse(stale.exists())
+            self.assertTrue((fixture.project / "grader/repository_current").is_dir())
+            self.assertTrue((fixture.project / "grader/repository_map.json").is_file())
+            self.assertEqual(second["repository_evidence"], first["repository_evidence"])
+
+    def test_refuses_to_replace_kept_current_state_after_grading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture, _, _ = prepare(directory)
+            (fixture.project / "grader/grading_runs/run_v001").mkdir(parents=True)
+            grader = fixture.project / "grader"
+            before = sorted(str(p.relative_to(grader)) for p in grader.rglob("*"))
+            with NoNetwork(fixture) as guard, self.assertRaises(FileExistsError):
                 write_submission_manifest(fixture.project)
-            self.assertFalse((fixture.project / "grader/anonymized_submissions").exists())
+            self.assertEqual(guard.git_calls, [])
+            self.assertEqual(sorted(str(p.relative_to(grader)) for p in grader.rglob("*")),
+                             before)
 
     def test_grading_receives_repository_evidence(self):
         from ai_grader.grading import build_student_input, load_grading_inputs
