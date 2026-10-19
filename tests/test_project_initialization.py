@@ -1,10 +1,12 @@
 import builtins
 import contextlib
+import errno
 import io
 import os
 import shutil
 import stat
 import tempfile
+import threading
 import unittest
 import zipfile
 from pathlib import Path
@@ -12,7 +14,8 @@ from unittest.mock import patch
 
 from ai_grader.cli import main
 from ai_grader.project_initialization import (
-    PROJECT_SUBFOLDERS, ProjectInitializationError, count_items, init_project,
+    PROJECT_SUBFOLDERS, RENAME_RETRY_DELAYS, ProjectInitializationError,
+    count_items, init_project,
 )
 
 # Synthetic Brightspace download; no real student data.
@@ -475,15 +478,18 @@ class ExistingFolderTests(unittest.TestCase):
             project = root / "projects" / "demo"
             make_download(project, extra=False)
             real_rename = Path.rename
-            calls = []
+            sources = []
 
-            def flaky_rename(self, target):
-                calls.append(self)
-                if len(calls) == 2:
+            def locked_rename(self, target):
+                # The second item stays locked through every retry.
+                if self not in sources:
+                    sources.append(self)
+                if len(sources) > 1 and self == sources[1]:
                     raise PermissionError(13, "Access is denied", str(self))
                 return real_rename(self, target)
 
-            with patch.object(Path, "rename", flaky_rename), \
+            with patch.object(Path, "rename", locked_rename), \
+                 patch("ai_grader.project_initialization.time.sleep") as sleep, \
                  self.assertRaises(ProjectInitializationError) as raised:
                 init_project("demo", workspace_path=root)
             message = str(raised.exception)
@@ -491,10 +497,142 @@ class ExistingFolderTests(unittest.TestCase):
             self.assertIn("Access is denied", message)
             for text in STUDENT_STRINGS:
                 self.assertNotIn(text, message)
+            self.assertEqual([c.args[0] for c in sleep.call_args_list],
+                             list(RENAME_RETRY_DELAYS))
 
             # Rerunning finishes the remaining moves without conflicts.
             init_project("demo", workspace_path=root)
             self.assertEqual(len(list((project / "submissions").iterdir())), 4)
+
+
+class TemporaryLockTests(unittest.TestCase):
+    """Folder moves retry briefly while a Windows file lock clears."""
+
+    def locked_for(self, attempts, error=None):
+        """Patch Path.rename so each source fails `attempts` times, then works."""
+        real_rename = Path.rename
+        failures = {}
+        error = error or (lambda path: PermissionError(
+            13, "The process cannot access the file because it is being used "
+            "by another process", str(path)))
+
+        def rename(path, target):
+            failures[path] = failures.get(path, 0) + 1
+            if failures[path] <= attempts:
+                raise error(path)
+            return real_rename(path, target)
+
+        return patch.object(Path, "rename", rename), failures
+
+    def test_temporary_lock_on_move_is_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "projects" / "demo"
+            make_download(project, extra=False)
+            locked, failures = self.locked_for(2)
+            with locked, patch("ai_grader.project_initialization.time.sleep") as sleep:
+                code, output = run_cli(root, "demo")
+            self.assertEqual(code, 0, output)
+            self.assertIn("Moved into submissions\\: 3 submission folders, 1 index.html",
+                          output)
+            self.assertEqual(len(list((project / "submissions").iterdir())), 4)
+            self.assertTrue(all(count == 3 for count in failures.values()))
+            # Two waits per item, with backoff: 0.125 s, then 0.25 s.
+            self.assertEqual([c.args[0] for c in sleep.call_args_list],
+                             [0.125, 0.25] * 4)
+
+    def test_temporary_lock_on_zip_extraction_is_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "projects" / "demo"
+            project.mkdir(parents=True)
+            make_zip(project / ZIP_NAME)
+            locked, _ = self.locked_for(3)
+            with locked, patch("ai_grader.project_initialization.time.sleep"):
+                plan = init_project("demo", workspace_path=root)
+            self.assertEqual(count_items(plan, "extract"), (3, 1))
+            self.assertEqual(len(list((project / "submissions").iterdir())), 4)
+            self.assertEqual(staging_folders(project), [])
+
+    def test_windows_sharing_violation_is_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "projects" / "demo"
+            make_download(project, extra=False)
+
+            def sharing_violation(path):
+                error = OSError(errno.EIO, "Sharing violation", str(path))
+                error.winerror = 32  # Set directly so the test also runs on Linux.
+                return error
+
+            locked, _ = self.locked_for(1, sharing_violation)
+            with locked, patch("ai_grader.project_initialization.time.sleep"):
+                init_project("demo", workspace_path=root)
+            self.assertEqual(len(list((project / "submissions").iterdir())), 4)
+
+    @unittest.skipUnless(os.name == "nt", "open files block folder renames only on Windows")
+    def test_real_windows_lock_released_during_retries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "projects" / "demo"
+            make_download(project, extra=False)
+            held = open(project / STUDENT_FOLDERS[0] / "analysis.py", "rb")
+            timer = threading.Timer(0.3, held.close)
+            timer.start()
+            try:
+                init_project("demo", workspace_path=root)
+            finally:
+                timer.cancel()
+                held.close()
+            self.assertEqual(len(list((project / "submissions").iterdir())), 4)
+
+    def test_lock_that_outlasts_retries_stops_safely(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "projects" / "demo"
+            make_download(project, extra=False)
+            locked, failures = self.locked_for(99)
+            with locked, patch("ai_grader.project_initialization.time.sleep") as sleep, \
+                 self.assertRaises(ProjectInitializationError) as raised:
+                init_project("demo", workspace_path=root)
+            self.assertIn("Stopped after placing 0 of 4", str(raised.exception))
+            self.assertEqual(list(failures.values()), [len(RENAME_RETRY_DELAYS) + 1])
+            self.assertAlmostEqual(sum(c.args[0] for c in sleep.call_args_list), 1.875)
+            self.assertEqual(list((project / "submissions").iterdir()), [])
+
+    def test_other_errors_are_not_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "projects" / "demo"
+            make_download(project, extra=False)
+            locked, failures = self.locked_for(
+                99, lambda path: OSError(errno.ENOSPC, "No space left on device"))
+            with locked, patch("ai_grader.project_initialization.time.sleep") as sleep, \
+                 self.assertRaises(ProjectInitializationError) as raised:
+                init_project("demo", workspace_path=root)
+            self.assertIn("No space left on device", str(raised.exception))
+            self.assertEqual(list(failures.values()), [1])
+            sleep.assert_not_called()
+
+    def test_item_appearing_during_retry_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "projects" / "demo"
+            make_download(project, extra=False)
+            locked, _ = self.locked_for(99)
+            first = sorted(STUDENT_FOLDERS, key=str.lower)[0]
+            intruder = project / "submissions" / first
+
+            def appear(delay):
+                intruder.mkdir(exist_ok=True)
+
+            with locked, patch("ai_grader.project_initialization.time.sleep",
+                               side_effect=appear), \
+                 self.assertRaises(ProjectInitializationError) as raised:
+                init_project("demo", workspace_path=root)
+            self.assertIn("appeared in submissions", str(raised.exception))
+            self.assertEqual(list(intruder.iterdir()), [])
+            self.assertTrue((project / first / "analysis.py").is_file())
 
 
 ZIP_NAME = "Project 1 Download Oct 18, 2026.zip"

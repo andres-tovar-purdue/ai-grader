@@ -1,8 +1,10 @@
+import errno
 import hashlib
 import os
 import re
 import shutil
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -21,6 +23,12 @@ BRIGHTSPACE_FOLDER_PATTERN = re.compile(r"^\d+-\d+ - ")
 BRIGHTSPACE_INDEX_NAME = "index.html"
 EXTRACTION_STAGING_PREFIX = ".ai_grader_extract_"
 HASH_CHUNK_SIZE = 1024 * 1024
+
+# Antivirus or Explorer can hold a just-written folder for a moment. Retry a
+# locked rename 5 times in total, with backoff, over about 2 seconds.
+RENAME_RETRY_DELAYS = (0.125, 0.25, 0.5, 1.0)
+# ERROR_ACCESS_DENIED and ERROR_SHARING_VIOLATION.
+WINDOWS_LOCK_ERRORS = {5, 32}
 
 # When the same submission is available from several places, prefer an
 # already-extracted folder over extracting it again from the ZIP.
@@ -344,6 +352,34 @@ def check_free_space(plan):
         )
 
 
+def is_file_lock_error(error):
+    """True for errors a briefly held Windows lock causes (antivirus, Explorer)."""
+    return (isinstance(error, PermissionError)
+            or getattr(error, "winerror", None) in WINDOWS_LOCK_ERRORS)
+
+
+def rename_with_retry(source, target):
+    """
+    Rename source to target, retrying briefly while a file lock clears.
+
+    Tries RENAME_RETRY_DELAYS + 1 times in total. Other errors, or a lock that
+    outlasts the retries, are raised for the caller's safe stop. The target is
+    rechecked before every attempt, so nothing is ever overwritten.
+    """
+    for delay in (*RENAME_RETRY_DELAYS, None):
+        if os.path.lexists(target):
+            raise FileExistsError(
+                errno.EEXIST, "an item appeared in submissions\\ during the move"
+            )
+        try:
+            source.rename(target)
+            return
+        except OSError as error:
+            if delay is None or not is_file_lock_error(error):
+                raise
+        time.sleep(delay)
+
+
 def extract_zip_items(plan, zip_record, submissions_path, done, total):
     """Extract this ZIP's selected items via a staging folder, then move them in."""
     if not zip_record["extract_items"]:
@@ -366,7 +402,7 @@ def extract_zip_items(plan, zip_record, submissions_path, done, total):
                         "submissions\\. Nothing was overwritten. Rerun "
                         "init-project to continue."
                     )
-                extracted.rename(target)
+                rename_with_retry(extracted, target)
                 done += 1
     except (OSError, zipfile.BadZipFile) as error:
         # OS messages include paths, which contain student names.
@@ -509,7 +545,7 @@ def init_project(project_name, workspace_path=None, dry_run=False):
             )
         try:
             # rename moves the folder without opening any file in it.
-            item["source"]["path"].rename(target)
+            rename_with_retry(item["source"]["path"], target)
         except OSError as error:
             raise ProjectInitializationError(
                 f"Stopped after placing {done} of {total} item(s): "

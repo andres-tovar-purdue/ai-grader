@@ -324,7 +324,7 @@ Then run the command again without `--dry-run` to apply the changes.
 
 AI Grader reports counts only and never prints student names. Everything runs locally: AI Grader reads the Brightspace ZIP to extract it, and when the same submission exists in two places it compares their contents locally. Nothing is sent to the AI model at this stage.
 
-Running the command again is safe. Submissions already in `submissions\` with the same file names and identical contents (compared by SHA-256 checksum) are reported as "Already in submissions\ (skipped)", so a kept ZIP is not extracted twice. If an earlier run was interrupted, running it again finishes the remaining items.
+Running the command again is safe. Submissions already in `submissions\` with the same file names and identical contents (compared by SHA-256 checksum) are reported as "Already in submissions\ (skipped)", so a kept ZIP is not extracted twice. If Windows briefly locks a folder (for example, while antivirus scans it or Explorer has it open), AI Grader retries the move for about 2 seconds. If the folder is still locked, it stops and reports how many items it placed; close the program using the folder and run the command again. If an earlier run was interrupted, running it again finishes the remaining items.
 
 Nothing is overwritten. If `submissions\` already holds a different folder or `index.html` with the same name, or if the ZIP and an extracted copy of the same submission differ, the command stops before changing anything and reports how many items clash. Compare them with `submissions\`, remove or rename the duplicates, then run the command again. The command also stops without changes if the ZIP is password-protected, contains unsafe file paths, or needs more disk space than is free.
 
