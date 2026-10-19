@@ -16,6 +16,7 @@ from ai_grader.project_initialization import (
 from ai_grader.project_inspection import inspect_project
 from ai_grader.project_manifest import write_project_manifest
 from ai_grader.project_preparation import prepare_project
+from ai_grader.repo_evidence import NO_LINK_REASONS
 from ai_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
 from ai_grader.spec_approval import approve_grading_spec
 from ai_grader.spec_generation import generate_grading_spec
@@ -943,15 +944,27 @@ def main():
                   f"{repositories['students_without_repository_urls']}")
             for status, count in repositories["fetch_status_counts"].items():
                 print(f"  {status.replace('_', ' ')}: {count}")
-            unmatched = repositories["index_blocks_not_matched_to_a_student"]
+            missing = repositories["students_without_recognized_repository_link"]
+            if missing:
+                print("  No recognized repository link:")
+                for student_id, reason in missing.items():
+                    print(f"    - {student_id}: {NO_LINK_REASONS[reason]}")
+            candidates = repositories["candidate_repositories_for_instructor_review"]
+            if candidates:
+                print("  Possible repositories for instructor review (not fetched or graded):")
+                for student_id, count in candidates.items():
+                    print(f"    - {student_id}: {count} candidate(s)")
+            unmatched = repositories["index_entries_with_github_links_not_matched"]
             if unmatched:
                 print(f"  Warning: {unmatched} index.html entr"
-                      f"{'y' if unmatched == 1 else 'ies'} with repository links "
+                      f"{'y' if unmatched == 1 else 'ies'} with GitHub links "
                       "could not be matched to exactly one student; their "
                       "repositories were not fetched.")
-            print("  Repository facts and files are in each student's "
-                  "anonymized folder; owners and URLs are kept privately in "
-                  "grader\\repository_map.json.")
+            print("  Graded repository files are the last commit at or before "
+                  "each submission time. Facts and files are in each student's "
+                  "anonymized folder; current repository states are kept in "
+                  "grader\\repository_current (not graded); owners, URLs and "
+                  "candidates are kept privately in grader\\repository_map.json.")
 
         print()
         print("Review before grading:")
