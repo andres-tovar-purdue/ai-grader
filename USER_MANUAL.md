@@ -1,5 +1,19 @@
 # AI Grader User Manual
 
+## Set up on a new computer
+
+You need Git and Python 3.10 or newer. In PowerShell, from the folder that should hold AI Grader (for example `C:\Users\<username>\code\ai_grader`):
+
+```powershell
+git clone https://github.com/andres-tovar-purdue/ai-grader.git
+cd ai-grader
+python install.py
+```
+
+`install.py` creates the virtual environment, installs AI Grader, creates the `projects\` folder next to the repository, asks for your OpenAI API key and model to create `.env`, and tests the API connection. It is safe to rerun and never overwrites an existing `.env`. When it finishes, it prints the command to activate the environment and the next step. Part I explains each step.
+
+---
+
 ## 1. Overview
 
 **AI Grader** is a human-supervised grading system for engineering computing projects. It combines deterministic file processing, AI-assisted rubric evaluation, anonymized student submissions, and instructor review.
@@ -54,17 +68,18 @@ The Python command-line package is invoked with:
 python -m ai_grader
 ```
 
-A recommended Windows workspace is:
+The **AI Grader workspace** is the folder that holds the repository and the `projects` folder side by side, for example:
 
 ```text
-C:\Users\<username>\code\ai_grader\
-├── .venv\
-├── ai-grader\
-├── projects\
-└── .env
+C:\Users\<username>\code\ai_grader\      the workspace
+├── ai-grader\                           the Git repository
+│   ├── .venv\                           Python virtual environment (not in Git)
+│   ├── .env                             API key and settings (not in Git)
+│   └── .env.example                     template for .env
+└── projects\                            grading projects and student data
 ```
 
-The repository contains the AI Grader software. The `projects` folder contains local course and student data and should remain outside the Git repository.
+The repository contains the AI Grader software, its virtual environment and its `.env` settings file; Git ignores `.venv\` and `.env`. The `projects` folder contains local course and student data and stays outside the repository. Run AI Grader commands from the workspace.
 
 ---
 
@@ -84,29 +99,15 @@ The Python package requires Python 3.10 or newer.
 
 # Part I — First-Time Installation
 
-## 4. Create the AI Grader Workspace
+## 4. Choose the AI Grader Workspace
 
-Create a local workspace. For example:
+Create a folder for AI Grader, for example:
 
 ```text
 C:\Users\<username>\code\ai_grader
 ```
 
-Open Visual Studio Code and select:
-
-```text
-File → Open Folder...
-```
-
-Open the new `ai_grader` folder.
-
-Then open the integrated terminal:
-
-```text
-Terminal → New Terminal
-```
-
-The terminal should start in the workspace, for example:
+Open it in Visual Studio Code (**File → Open Folder...**), then open a terminal (**Terminal → New Terminal**). The terminal should start in the workspace:
 
 ```text
 PS C:\Users\<username>\code\ai_grader>
@@ -116,108 +117,86 @@ PS C:\Users\<username>\code\ai_grader>
 
 ## 5. Clone the Repository
 
-From the AI Grader workspace, run:
+From the workspace, run:
 
 ```powershell
 git clone https://github.com/andres-tovar-purdue/ai-grader.git
-```
-
-The workspace should now contain:
-
-```text
-ai_grader\
-└── ai-grader\
+cd ai-grader
 ```
 
 ---
 
-## 6. Create the Local Projects Folder
+## 6. Run the Setup Script
 
-From the AI Grader workspace:
+From the repository folder (`ai-grader\`), run:
 
 ```powershell
-mkdir projects
+python install.py
 ```
+
+Use any Python 3.10 or newer; no virtual environment is needed yet. The script:
+
+1. checks the Python version;
+2. creates the virtual environment `ai-grader\.venv\` if it is missing;
+3. installs AI Grader into it with `pip install -e .`;
+4. asks before creating the `projects\` folder next to the repository;
+5. creates `ai-grader\.env` from `.env.example` if `.env` is missing, asking for:
+   - `OPENAI_API_KEY` (not shown while you type or paste it);
+   - `OPENAI_MODEL`, for example `gpt-5.4-mini` (required);
+   - `GRADER_INSTRUCTOR_NAME`, the person who reviews and approves grading specifications (optional now; `approve-spec` needs it);
+6. makes one small test request to the OpenAI API;
+7. prints the command to activate the environment and the next step.
+
+It is safe to rerun at any time. It keeps an existing virtual environment and never overwrites or reads an existing `.env`.
 
 The workspace should now look like:
 
 ```text
 ai_grader\
 ├── ai-grader\
+│   ├── .venv\
+│   └── .env
 └── projects\
 ```
 
-Student submissions and course-specific grading projects will be stored under `projects\`, not inside the Git repository.
-
 ---
 
-## 7. Create the Python Virtual Environment
+## 7. Activate the Virtual Environment
 
-Create the virtual environment at the **AI Grader workspace root**:
-
-```powershell
-python -m venv .venv
-```
-
-Activate it:
+Return to the workspace and activate the environment:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+cd ..
+.\ai-grader\.venv\Scripts\Activate.ps1
 ```
 
-The terminal prompt should now begin with `(.venv)`, for example:
+The prompt should now begin with `(.venv)`:
 
 ```text
 (.venv) PS C:\Users\<username>\code\ai_grader>
 ```
 
-The workspace should now look like:
-
-```text
-ai_grader\
-├── .venv\
-├── ai-grader\
-└── projects\
-```
+Activate it this way at the start of every work session.
 
 ---
 
-## 8. Install AI Grader
+## 8. Check the Setup
 
-With the virtual environment active, run:
-
-```powershell
-python -m pip install --upgrade pip
-python -m pip install -e .\ai-grader
-```
-
-The `-e` option installs the local repository in editable mode. Changes made to the local AI Grader source code are therefore available immediately without reinstalling the package unless the dependencies change.
-
-Verify the installation:
+With the environment active, from the workspace:
 
 ```powershell
-python -m ai_grader --help
+python -m ai_grader check-setup
 ```
 
-The command should display the available AI Grader commands.
+It reports whether the virtual environment is active, `.env` exists, `OPENAI_API_KEY` is set (the key is never shown), `OPENAI_MODEL` is set, the `projects\` folder exists, and the API is reachable. Add `--skip-api` to skip the test request. Any problem is listed with what to do.
+
+The setup is now complete.
 
 ---
 
-## 9. Configure the `.env` File
+## 9. Change the `.env` Settings
 
-Create a file named:
-
-```text
-.env
-```
-
-in the AI Grader workspace root:
-
-```text
-C:\Users\<username>\code\ai_grader\.env
-```
-
-Add:
+`install.py` creates `.env` only once. To change a setting later, edit `ai-grader\.env` in a text editor:
 
 ```text
 OPENAI_API_KEY=your_api_key_here
@@ -225,17 +204,9 @@ OPENAI_MODEL=gpt-5.4-mini
 GRADER_INSTRUCTOR_NAME=Full Name
 ```
 
-`GRADER_INSTRUCTOR_NAME` should be the person who actually reviews and approves the grading specification.
+To start over, delete `.env` and rerun `python install.py`. `.env.example` also lists Anthropic settings; these are planned and not yet supported.
 
 Do **not** commit `.env` to Git or share the API key.
-
-To verify the configuration without printing the API key:
-
-```powershell
-python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(os.getenv('OPENAI_MODEL')); print(os.getenv('GRADER_INSTRUCTOR_NAME'))"
-```
-
-The setup is now complete.
 
 ---
 
@@ -277,6 +248,8 @@ projects\
 The command also prints the next recommended step.
 
 If you run the command from inside `projects\` or from inside the project folder itself, AI Grader uses that folder instead of creating `projects\projects\PROJECT_ID`, and says which folder it used. You can also pass the name as a path such as `projects\PROJECT_ID`. If a folder named `PROJECT_ID` sits in the current folder but not in `projects\`, the command stops without changing anything and asks you to move it into `projects\` first.
+
+If the project folder would be inside a Git repository (for example, because you ran the command from `ai-grader\`), the command stops without changing anything and asks you to run it from the workspace folder. This keeps student data out of Git. The repository's `.gitignore` also ignores `projects\` as a second safeguard.
 
 ### Starting from a Brightspace download
 
@@ -617,7 +590,7 @@ Run:
 python -m ai_grader grade-submissions .\projects\PROJECT_ID
 ```
 
-The grading model defaults to the model configured in `OPENAI_MODEL`. A model can also be selected for one run:
+The grading model defaults to the model configured in `OPENAI_MODEL`. Like every command that calls the model (`prepare-project`, `generate-spec`, `grade-submissions`, `check-setup`), it first prints the model it will use and where that came from, for example `Model: gpt-5.4-mini (from OPENAI_MODEL)`. A model can also be selected for one run:
 
 ```powershell
 python -m ai_grader grade-submissions .\projects\PROJECT_ID --model MODEL_ID
@@ -757,7 +730,7 @@ C:\Users\<username>\code\ai_grader
 Open a terminal and activate the environment:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+.\ai-grader\.venv\Scripts\Activate.ps1
 ```
 
 Then inspect the project:
@@ -784,7 +757,7 @@ git pull
 cd ..
 ```
 
-Because AI Grader is installed in editable mode, normal source-code updates do not require another `pip install -e` unless the package dependencies change.
+Because AI Grader is installed in editable mode, normal source-code updates do not require reinstalling. If the package dependencies change, rerun `python install.py` from `ai-grader\`; it keeps your `.env`.
 
 Do not use `git pull` blindly if you have made uncommitted source-code changes.
 
@@ -799,6 +772,12 @@ python -m ai_grader --help
 ```
 
 Display the available commands.
+
+```text
+python -m ai_grader check-setup
+```
+
+Check the virtual environment, `.env`, API key (never shown), model, `projects\` folder and API connection. Add `--skip-api` to skip the test request.
 
 ```text
 python -m ai_grader init-project PROJECT_ID
@@ -884,7 +863,7 @@ Create final instructor and student-facing reports from instructor-approved scor
 
 ## 28. The Command `python -m ai_grader` Does Not Work
 
-Confirm that the terminal prompt begins with `(.venv)`, AI Grader was installed with `python -m pip install -e .\ai-grader`, and the terminal is running from the AI Grader workspace.
+Run `.\ai-grader\.venv\Scripts\python.exe -m ai_grader check-setup` from the AI Grader workspace. Confirm that the terminal prompt begins with `(.venv)` and the terminal is running from the workspace. If AI Grader is not installed, rerun `python install.py` from `ai-grader\`.
 
 Then try:
 
@@ -896,24 +875,24 @@ python -m ai_grader --help
 
 ## 29. The API Configuration Is Not Found
 
-Confirm that `.env` is located at:
+Run:
 
-```text
-C:\Users\<username>\code\ai_grader\.env
+```powershell
+python -m ai_grader check-setup
 ```
 
-and contains:
+`.env` belongs in the repository folder:
+
+```text
+C:\Users\<username>\code\ai_grader\ai-grader\.env
+```
+
+If `check-setup` reports it at the old location (the workspace root), move it into `ai-grader\`. If it is missing, rerun `python install.py` from `ai-grader\`. It should contain:
 
 ```text
 OPENAI_API_KEY=...
 OPENAI_MODEL=...
 GRADER_INSTRUCTOR_NAME=...
-```
-
-Verify the non-secret values with:
-
-```powershell
-python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(os.getenv('OPENAI_MODEL')); print(os.getenv('GRADER_INSTRUCTOR_NAME'))"
 ```
 
 Never print the API key into screenshots, logs, assignments, or repository files.

@@ -1,9 +1,8 @@
 import json
-import os
 import re
 from pathlib import Path
 
-from ai_grader.ai_client import get_client
+from ai_grader.ai_client import get_client, resolve_model
 from ai_grader.dataset_inspection import collect_csv_datasets
 from ai_grader.source_extraction import discover_project_sources
 
@@ -154,7 +153,7 @@ def prepare_project(project_path, client=None, full_csv_max_bytes=200_000):
 
     client = client or get_client()
     response = client.responses.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-5"),
+        model=resolve_model(),
         instructions=(
             "You prepare conservative, source-grounded engineering project "
             "drafts for instructor review. Do not grade student submissions."

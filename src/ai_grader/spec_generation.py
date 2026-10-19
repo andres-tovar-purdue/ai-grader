@@ -1,9 +1,8 @@
 import json
-import os
 import re
 from pathlib import Path
 
-from ai_grader.ai_client import get_client
+from ai_grader.ai_client import get_client, resolve_model
 from ai_grader.project_manifest import build_project_manifest
 from ai_grader.source_extraction import extract_pdf
 from ai_grader.spec_validation import validate_grading_spec
@@ -328,13 +327,8 @@ def generate_grading_spec(
 
     client = get_client()
 
-    model = os.getenv(
-        "OPENAI_MODEL",
-        "gpt-5",
-    )
-
     response = client.responses.create(
-        model=model,
+        model=resolve_model(),
         instructions=(
             "You are an instructor-supervised grading "
             "specification agent for engineering computing "

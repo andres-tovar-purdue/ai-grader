@@ -235,6 +235,7 @@ student_data/
 
 # Local project data
 local_projects/
+projects/
 
 # Common generated grading outputs
 *.xlsx
@@ -247,6 +248,7 @@ __pycache__/
 # OpenAI API key files
 .env
 .env.*
+!.env.example
 
 # Private/generated student grading data
 **/grader/student_map.json

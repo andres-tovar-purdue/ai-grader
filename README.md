@@ -1,6 +1,42 @@
 # AI Grader
 Human-supervised AI grading assistant for projects, exams, homework, lab reports, programming assignments and spreadsheets
 
+## Set up on a new computer
+
+You need Git and Python 3.10 or newer. In PowerShell, from the folder that should
+hold AI Grader:
+
+```powershell
+git clone https://github.com/andres-tovar-purdue/ai-grader.git
+cd ai-grader
+python install.py
+```
+
+`install.py` creates `.venv\` and `.env` inside the repository (Git ignores both),
+installs AI Grader with `pip install -e .`, creates `projects\` next to the
+repository after asking, prompts for `OPENAI_API_KEY` and `OPENAI_MODEL`, and tests
+the API connection. It is safe to rerun and never overwrites an existing `.env`.
+
+```text
+<workspace>\
+├── ai-grader\        this repository, with .venv\ and .env
+└── projects\         grading projects and student data, outside the repository
+```
+
+Run AI Grader from the workspace folder:
+
+```powershell
+.\ai-grader\.venv\Scripts\Activate.ps1
+python -m ai_grader check-setup
+```
+
+`init-project` refuses to create a project inside a Git repository, so student data
+stays out of Git; `projects/` is also in `.gitignore`.
+
+`check-setup` reports the virtual environment, `.env`, API key (never shown), model,
+`projects\` folder and API connection. See [USER_MANUAL.md](USER_MANUAL.md) for the
+full workflow.
+
 ## Human-Supervised Grading Workflow
 
 The grader combines deterministic processing, AI-assisted rubric evaluation, and instructor review. AI-generated assessments remain preliminary until the instructor verifies the evidence and approves the final scores and feedback.
@@ -66,8 +102,11 @@ After the grading specification is instructor-approved, run:
 python -m ai_grader grade-submissions PROJECT_PATH
 ```
 
-The default grading model is `gpt-5.4-mini`. Override it for one run with
-`--model MODEL_ID`, or set `OPENAI_MODEL` for an environment-wide default.
+The model comes from `OPENAI_MODEL` in `.env`, which `install.py` requires.
+Override it for one run with `--model MODEL_ID`. If `OPENAI_MODEL` is unset, every
+command falls back to `gpt-5.4-mini` (`DEFAULT_MODEL` in `ai_client.py`). Every
+command that calls the model first prints the model and whether it came from
+`--model`, `OPENAI_MODEL` or the default.
 New structured runs record the exact selected model and any token usage returned
 by the Responses API. Cost remains unset unless maintainable pricing assumptions
 are explicitly configured.

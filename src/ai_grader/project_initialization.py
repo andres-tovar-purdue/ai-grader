@@ -420,6 +420,17 @@ def is_projects_folder(path):
     return path.name.lower() == "projects"
 
 
+def enclosing_git_repository(path):
+    """Return the nearest folder at or above path that holds .git, or None."""
+
+    path = Path(path).resolve()
+    for folder in (path, *path.parents):
+        # .git is a file in worktrees and submodules.
+        if (folder / ".git").exists():
+            return folder
+    return None
+
+
 def resolve_project_path(project_name, current_path):
     """
     Return (project folder, note) for init-project, so that running it from
@@ -506,6 +517,15 @@ def init_project(project_name, workspace_path=None, dry_run=False):
         workspace_path = Path.cwd()
 
     project_path, note = resolve_project_path(project_name, workspace_path)
+
+    repository = enclosing_git_repository(project_path)
+    if repository is not None:
+        raise ProjectInitializationError(
+            f"Stopped: {project_path} would be inside the git repository "
+            f"{repository}, and student data must stay out of git. Nothing was "
+            "changed. Run init-project from the workspace folder (the one that "
+            "holds ai-grader\\ and projects\\)."
+        )
 
     plan = plan_project_initialization(project_path)
     plan["location_note"] = note
