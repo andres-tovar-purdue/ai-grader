@@ -1,5 +1,5 @@
-# engineering-project-grader
-Modular AI grading agent for engineering programming projects
+# AI Grader
+Human-supervised AI grading assistant for projects, exams, homework, lab reports, programming assignments and spreadsheets
 
 ## Human-Supervised Grading Workflow
 
@@ -25,7 +25,7 @@ assignment materials in `PROJECT_PATH/project/`, and place CSV datasets in
 `PROJECT_PATH/datasets/`. Then run:
 
 ```powershell
-python -m project_grader prepare-project PROJECT_PATH
+python -m ai_grader prepare-project PROJECT_PATH
 ```
 
 The command preserves original files and creates three drafts:
@@ -51,7 +51,7 @@ to 200 KB are supplied in full. Larger CSV files are limited to a labeled sample
 Prepare submissions before grading:
 
 ```powershell
-python -m project_grader prepare-submissions PROJECT_PATH
+python -m ai_grader prepare-submissions PROJECT_PATH
 ```
 
 This writes a sanitized `submission_manifest.json`, a private `student_map.json`,
@@ -63,7 +63,7 @@ require instructor review if visible identity is suspected.
 After the grading specification is instructor-approved, run:
 
 ```powershell
-python -m project_grader grade-submissions PROJECT_PATH
+python -m ai_grader grade-submissions PROJECT_PATH
 ```
 
 The default grading model is `gpt-5.4-mini`. Override it for one run with

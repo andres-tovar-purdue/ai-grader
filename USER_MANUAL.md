@@ -45,13 +45,13 @@ Throughout this manual, the software is called **AI Grader**.
 The current GitHub repository is:
 
 ```text
-https://github.com/andres-tovar-purdue/engineering-project-grader
+https://github.com/andres-tovar-purdue/ai-grader
 ```
 
 The Python command-line package is invoked with:
 
 ```powershell
-python -m project_grader
+python -m ai_grader
 ```
 
 A recommended Windows workspace is:
@@ -59,7 +59,7 @@ A recommended Windows workspace is:
 ```text
 C:\Users\<username>\code\ai_grader\
 ├── .venv\
-├── engineering-project-grader\
+├── ai-grader\
 ├── projects\
 └── .env
 ```
@@ -119,14 +119,14 @@ PS C:\Users\<username>\code\ai_grader>
 From the AI Grader workspace, run:
 
 ```powershell
-git clone https://github.com/andres-tovar-purdue/engineering-project-grader.git
+git clone https://github.com/andres-tovar-purdue/ai-grader.git
 ```
 
 The workspace should now contain:
 
 ```text
 ai_grader\
-└── engineering-project-grader\
+└── ai-grader\
 ```
 
 ---
@@ -143,7 +143,7 @@ The workspace should now look like:
 
 ```text
 ai_grader\
-├── engineering-project-grader\
+├── ai-grader\
 └── projects\
 ```
 
@@ -176,7 +176,7 @@ The workspace should now look like:
 ```text
 ai_grader\
 ├── .venv\
-├── engineering-project-grader\
+├── ai-grader\
 └── projects\
 ```
 
@@ -188,7 +188,7 @@ With the virtual environment active, run:
 
 ```powershell
 python -m pip install --upgrade pip
-python -m pip install -e .\engineering-project-grader
+python -m pip install -e .\ai-grader
 ```
 
 The `-e` option installs the local repository in editable mode. Changes made to the local AI Grader source code are therefore available immediately without reinstalling the package unless the dependencies change.
@@ -196,7 +196,7 @@ The `-e` option installs the local repository in editable mode. Changes made to 
 Verify the installation:
 
 ```powershell
-python -m project_grader --help
+python -m ai_grader --help
 ```
 
 The command should display the available AI Grader commands.
@@ -252,13 +252,13 @@ Run AI Grader from the workspace root:
 Create a project using a short project identifier:
 
 ```powershell
-python -m project_grader init-project PROJECT_ID
+python -m ai_grader init-project PROJECT_ID
 ```
 
 For example:
 
 ```powershell
-python -m project_grader init-project mspe_49600_fa26_pr01
+python -m ai_grader init-project mspe_49600_fa26_pr01
 ```
 
 AI Grader creates:
@@ -329,13 +329,13 @@ Do not rename the Brightspace folders before running submission preparation.
 After copying the inputs, run:
 
 ```powershell
-python -m project_grader inspect .\projects\PROJECT_ID
+python -m ai_grader inspect .\projects\PROJECT_ID
 ```
 
 For example:
 
 ```powershell
-python -m project_grader inspect .\projects\mspe_49600_fa26_pr01
+python -m ai_grader inspect .\projects\mspe_49600_fa26_pr01
 ```
 
 `inspect` lists the files in the project folders and determines the current workflow stage.
@@ -353,7 +353,7 @@ This command can be used at any time to determine where a project is in the grad
 Run:
 
 ```powershell
-python -m project_grader prepare-project .\projects\PROJECT_ID
+python -m ai_grader prepare-project .\projects\PROJECT_ID
 ```
 
 This step uses the AI model to read the assignment instructions and instructor-provided dataset information and creates three instructor-reviewable Markdown files:
@@ -399,7 +399,7 @@ The reference solution represents **one valid approach**. It should not imply th
 After reviewing and, if necessary, editing the Markdown files, run:
 
 ```powershell
-python -m project_grader generate-spec .\projects\PROJECT_ID
+python -m ai_grader generate-spec .\projects\PROJECT_ID
 ```
 
 AI Grader creates:
@@ -435,7 +435,7 @@ The grading specification remains a draft until it is explicitly approved.
 Run the command printed by AI Grader, or:
 
 ```powershell
-python -m project_grader approve-spec ".\projects\PROJECT_ID\grader\grading_spec_v001.json"
+python -m ai_grader approve-spec ".\projects\PROJECT_ID\grader\grading_spec_v001.json"
 ```
 
 The approval is recorded using `GRADER_INSTRUCTOR_NAME` from the `.env` file.
@@ -447,7 +447,7 @@ Review or resolve those decisions before approving.
 If the instructor intentionally accepts the remaining ambiguities, the specification can be approved explicitly with:
 
 ```powershell
-python -m project_grader approve-spec ".\projects\PROJECT_ID\grader\grading_spec_v001.json" --allow-unresolved
+python -m ai_grader approve-spec ".\projects\PROJECT_ID\grader\grading_spec_v001.json" --allow-unresolved
 ```
 
 Use `--allow-unresolved` only after consciously reviewing the remaining issues.
@@ -463,7 +463,7 @@ After approval, the grading specification status becomes `approved`.
 After the grading specification is approved, run:
 
 ```powershell
-python -m project_grader prepare-submissions .\projects\PROJECT_ID
+python -m ai_grader prepare-submissions .\projects\PROJECT_ID
 ```
 
 AI Grader processes the Brightspace submission folders, groups multiple attempts by username, selects the latest parsed attempt, assigns anonymized IDs such as `Student_001`, `Student_002`, and `Student_003`, and creates:
@@ -514,13 +514,13 @@ Keep `student_map.json` private.
 Run:
 
 ```powershell
-python -m project_grader grade-submissions .\projects\PROJECT_ID
+python -m ai_grader grade-submissions .\projects\PROJECT_ID
 ```
 
 The grading model defaults to the model configured in `OPENAI_MODEL`. A model can also be selected for one run:
 
 ```powershell
-python -m project_grader grade-submissions .\projects\PROJECT_ID --model MODEL_ID
+python -m ai_grader grade-submissions .\projects\PROJECT_ID --model MODEL_ID
 ```
 
 AI Grader uses the approved grading specification, sanitized submission manifest, and anonymized student files.
@@ -561,7 +561,7 @@ Under this policy, criterion scores remain exact, each task subtotal is rounded 
 To disable this rounding for a grading run:
 
 ```powershell
-python -m project_grader grade-submissions .\projects\PROJECT_ID --rounding-policy exact-v1
+python -m ai_grader grade-submissions .\projects\PROJECT_ID --rounding-policy exact-v1
 ```
 
 The selected rounding policy is recorded with the grading run.
@@ -598,7 +598,7 @@ A finalization command requires one `--score` entry for each student.
 Example:
 
 ```powershell
-python -m project_grader finalize-grading ".\projects\PROJECT_ID" `
+python -m ai_grader finalize-grading ".\projects\PROJECT_ID" `
     --run run_v001 `
     --score Student_001=94 `
     --score Student_002=88.5 `
@@ -616,7 +616,7 @@ If a criterion-level score needs to be changed, use:
 For example:
 
 ```powershell
-python -m project_grader finalize-grading ".\projects\PROJECT_ID" `
+python -m ai_grader finalize-grading ".\projects\PROJECT_ID" `
     --run run_v001 `
     --score Student_001=94 `
     --criterion-score Student_001:t3_c2=4
@@ -663,7 +663,7 @@ Open a terminal and activate the environment:
 Then inspect the project:
 
 ```powershell
-python -m project_grader inspect .\projects\PROJECT_ID
+python -m ai_grader inspect .\projects\PROJECT_ID
 ```
 
 AI Grader should identify the current workflow stage and print the next command.
@@ -679,7 +679,7 @@ If the shared repository has been updated, update the local software copy before
 From the repository:
 
 ```powershell
-cd .\engineering-project-grader
+cd .\ai-grader
 git pull
 cd ..
 ```
@@ -695,61 +695,85 @@ Do not use `git pull` blindly if you have made uncommitted source-code changes.
 ## 27. Main Commands
 
 ```text
-python -m project_grader --help
+python -m ai_grader --help
 ```
 
 Display the available commands.
 
 ```text
-python -m project_grader init-project PROJECT_ID
+python -m ai_grader init-project PROJECT_ID
 ```
 
 Create a new local grading project.
 
 ```text
-python -m project_grader inspect PROJECT_PATH
+python -m ai_grader inspect PROJECT_PATH
 ```
 
 Inspect the project and determine the current workflow stage.
 
 ```text
-python -m project_grader prepare-project PROJECT_PATH
+python -m ai_grader manifest PROJECT_PATH
+```
+
+Write a machine-readable inventory of the project files to `grader\project_manifest.json`.
+
+```text
+python -m ai_grader prepare-project PROJECT_PATH
 ```
 
 Generate instructor-reviewable project instructions, rubric, and reference solution.
 
 ```text
-python -m project_grader generate-spec PROJECT_PATH
+python -m ai_grader generate-spec PROJECT_PATH
 ```
 
 Generate the draft grading specification.
 
 ```text
-python -m project_grader validate SPEC_PATH
+python -m ai_grader validate SPEC_PATH
 ```
 
 Validate the grading specification against the local schema.
 
 ```text
-python -m project_grader approve-spec SPEC_PATH
+python -m ai_grader approve-spec SPEC_PATH
 ```
 
 Approve an instructor-reviewed grading specification.
 
 ```text
-python -m project_grader prepare-submissions PROJECT_PATH
+python -m ai_grader prepare-submissions PROJECT_PATH
 ```
 
 Parse, select, anonymize, and inventory student submissions.
 
 ```text
-python -m project_grader grade-submissions PROJECT_PATH
+python -m ai_grader refresh-submission-checks PROJECT_PATH
+```
+
+Re-check original filenames against the approved specification without replacing the anonymized submissions.
+
+```text
+python -m ai_grader grade-submissions PROJECT_PATH
 ```
 
 Generate a preliminary AI-assisted grading run.
 
 ```text
-python -m project_grader finalize-grading PROJECT_PATH --run RUN_ID --score Student_###=POINTS
+python -m ai_grader recover-grading PROJECT_PATH --response-pattern PATTERN
+```
+
+Rebuild a grading run offline from saved model responses in `grader\debug_responses\`, with no new API calls. Responses that fail validation remain unscored.
+
+```text
+python -m ai_grader generate-report PROJECT_PATH --run RUN_ID --open
+```
+
+Create a named instructor review CSV with blank approval fields. `--run` defaults to the latest grading run.
+
+```text
+python -m ai_grader finalize-grading PROJECT_PATH --run RUN_ID --score Student_###=POINTS
 ```
 
 Create final instructor and student-facing reports from instructor-approved scores.
@@ -758,14 +782,14 @@ Create final instructor and student-facing reports from instructor-approved scor
 
 # Part IX — Troubleshooting
 
-## 28. The Command `python -m project_grader` Does Not Work
+## 28. The Command `python -m ai_grader` Does Not Work
 
-Confirm that the terminal prompt begins with `(.venv)`, AI Grader was installed with `python -m pip install -e .\engineering-project-grader`, and the terminal is running from the AI Grader workspace.
+Confirm that the terminal prompt begins with `(.venv)`, AI Grader was installed with `python -m pip install -e .\ai-grader`, and the terminal is running from the AI Grader workspace.
 
 Then try:
 
 ```powershell
-python -m project_grader --help
+python -m ai_grader --help
 ```
 
 ---
@@ -877,7 +901,7 @@ projects\
 outside:
 
 ```text
-engineering-project-grader\
+ai-grader\
 ```
 
 Do not copy course projects, student submissions, grading reports, `student_map.json`, or `.env` into the public software repository.

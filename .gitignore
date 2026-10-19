@@ -218,7 +218,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # ------------------------------
-# Engineering Project Grader
+# AI Grader
 # ------------------------------
 
 # Environment variables and credentials

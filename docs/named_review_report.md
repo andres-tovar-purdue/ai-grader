@@ -1,6 +1,6 @@
 # Named instructor review report
 
-Install this update in the engineering-project-grader repository. It adds
+Install this update in the ai-grader repository. It adds
 `generate-report` to the existing workflow. No project data is included.
 
 Run from the repository root:
