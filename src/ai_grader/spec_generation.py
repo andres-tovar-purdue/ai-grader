@@ -1,11 +1,12 @@
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 from ai_grader.ai_client import get_client, resolve_model
 from ai_grader.project_manifest import build_project_manifest
 from ai_grader.source_extraction import extract_pdf
-from ai_grader.spec_validation import validate_grading_spec
+from ai_grader.spec_validation import validate_grading_spec, validate_spec_data
 
 
 SOURCE_FOLDERS = {
@@ -27,6 +28,23 @@ TEXT_EXTENSIONS = {
 PDF_EXTENSIONS = {
     ".pdf",
 }
+
+
+# JSON Schema keywords the model may copy from the schema in the prompt.
+SCHEMA_METADATA_KEYS = ("$schema", "$id", "$comment")
+
+
+class InvalidSpecResponseError(RuntimeError):
+    """The model's specification failed parsing or validation; its raw response was saved."""
+
+    def __init__(self, messages, response_path):
+        self.messages = messages
+        self.response_path = response_path
+        super().__init__(
+            "The generated grading specification is invalid: "
+            + "; ".join(messages)
+            + f". Raw response saved to {response_path}"
+        )
 
 
 def make_source_id(relative_path):
@@ -249,6 +267,10 @@ IMPORTANT RULES:
 21. Return ONLY a JSON object. Do not use Markdown fences,
     explanations, or commentary outside the JSON.
 
+22. The schema below describes the object; it is not part of it. Do not
+    include JSON Schema keywords such as $schema, $id or $comment in the
+    object.
+
 JSON SCHEMA:
 
 {schema_text}
@@ -283,6 +305,55 @@ def parse_json_response(text):
         )
 
     return json.loads(text)
+
+
+def strip_schema_metadata(spec):
+    """Drop JSON Schema keywords the model copied to the top level of the spec."""
+
+    for key in SCHEMA_METADATA_KEYS:
+        spec.pop(key, None)
+    return spec
+
+
+def validation_messages(error):
+    """The individual messages of a spec validation error, without its heading."""
+
+    if not isinstance(error, ValueError):
+        return [f"{type(error).__name__}: {error}"]
+    lines = [line for line in str(error).splitlines() if line.strip()]
+    if len(lines) > 1 and lines[0].startswith("Invalid grading specification"):
+        lines = lines[1:]
+    return lines or [type(error).__name__]
+
+
+def save_invalid_response(grader_path, text):
+    """Keep a paid response that failed validation, so it is not lost."""
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    response_path = grader_path / f"invalid_spec_response_{timestamp}.json"
+    response_path.write_text(text, encoding="utf-8")
+    return response_path
+
+
+def parse_and_validate_spec(text, schema):
+    """
+    Return the draft spec from the model's text, or raise ValueError with
+    the reasons it is unusable.
+    """
+
+    try:
+        spec = parse_json_response(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"The response is not valid JSON: {error}") from None
+    if not isinstance(spec, dict):
+        raise ValueError("The response is not a JSON object.")
+
+    strip_schema_metadata(spec)
+    spec["status"] = "draft"
+    spec.pop("approval", None)
+    # Checks the schema first, then scoring totals and cross-references.
+    validate_spec_data(spec, schema)
+    return spec
 
 
 def validate_scoring_totals(spec):
@@ -344,23 +415,20 @@ def generate_grading_spec(
             "The model returned no grading specification."
         )
 
-    spec = parse_json_response(
-        response.output_text
-    )
-
-    spec["status"] = "draft"
-    spec.pop("approval", None)
-    # Enforce scoring consistency before writing the draft specification.
-    validate_scoring_totals(spec)
-
     grader_path = project_path / "grader"
     grader_path.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    from ai_grader.spec_validation import validate_spec_data
-    validate_spec_data(spec, schema)
+    try:
+        spec = parse_and_validate_spec(response.output_text, schema)
+    except (ValueError, KeyError, TypeError, StopIteration) as error:
+        response_path = save_invalid_response(grader_path, response.output_text)
+        raise InvalidSpecResponseError(
+            validation_messages(error), response_path
+        ) from None
+
     versions = [int(path.stem.rsplit("v", 1)[1])
                 for path in grader_path.glob("grading_spec_v[0-9][0-9][0-9].json")]
     output_path = grader_path / f"grading_spec_v{max(versions, default=0) + 1:03d}.json"

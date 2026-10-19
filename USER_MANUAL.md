@@ -441,6 +441,16 @@ The generated specification includes project information, sources, deliverables,
 
 AI Grader also checks the scoring structure before writing the specification. Criterion points must sum to their task maxima, and task maxima must sum to the project total. A separately scored Deliverables section must be represented in the scored task total.
 
+If the model copies JSON Schema keywords (`$schema`, `$id`, `$comment`) from the schema into the top level of its answer, AI Grader removes them before checking.
+
+If the generated specification still fails the checks, no draft is written. AI Grader lists the problems and saves the model's raw response, so the paid response is not lost:
+
+```text
+grader\invalid_spec_response_<timestamp>.json
+```
+
+Rerun `generate-spec` to try again.
+
 ---
 
 ## 16. Review the Grading Specification
