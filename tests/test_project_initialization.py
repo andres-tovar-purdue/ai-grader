@@ -3,6 +3,7 @@ import contextlib
 import io
 import os
 import shutil
+import stat
 import tempfile
 import unittest
 import zipfile
@@ -41,14 +42,37 @@ def no_submission_access(project):
     real_open, real_io_open, real_os_open = builtins.open, io.open, os.open
     real_iterdir = Path.iterdir
 
-    def inside_project(file):
-        try:
-            return Path(os.fspath(file)).resolve().is_relative_to(project)
-        except TypeError:
-            return False
+    def inside_project(path):
+        return Path(path).resolve().is_relative_to(project)
 
-    def is_top_level_zip(file):
-        path = Path(os.fspath(file)).resolve()
+    def fd_path(fd):
+        """Path behind an open descriptor (Linux), or None if unknown."""
+        link = f"/proc/self/fd/{fd}"
+        return Path(os.readlink(link)) if os.path.islink(link) else None
+
+    def opened_path(file, dir_fd):
+        """Absolute path an open call refers to, or None if it can't be located."""
+        if isinstance(file, int):
+            return fd_path(file)
+        path = Path(os.fspath(file))
+        if dir_fd is not None and not path.is_absolute():
+            # shutil.rmtree on Linux opens entries relative to a directory fd.
+            base = fd_path(dir_fd)
+            return None if base is None else base / path
+        return path
+
+    def is_regular_file(file, dir_fd):
+        try:
+            if dir_fd is not None and not isinstance(file, int):
+                info = os.stat(file, dir_fd=dir_fd)
+            else:
+                info = os.stat(file)
+        except OSError:
+            return False  # Nothing to read; the real open call will fail.
+        return stat.S_ISREG(info.st_mode)
+
+    def is_top_level_zip(path):
+        path = Path(path).resolve()
         return path.parent == project and path.suffix.lower() == ".zip"
 
     def is_read(args, kwargs, real):
@@ -59,9 +83,13 @@ def no_submission_access(project):
 
     def guard(real):
         def guarded(file, *args, **kwargs):
-            if (inside_project(file) and is_read(args, kwargs, real)
-                    and not is_top_level_zip(file)):
-                raise AssertionError(f"init-project read a file: {file}")
+            dir_fd = kwargs.get("dir_fd")
+            # Directories may be opened (rmtree does on Linux); only regular
+            # files count as reads. A file we can't locate counts as inside.
+            if is_read(args, kwargs, real) and is_regular_file(file, dir_fd):
+                path = opened_path(file, dir_fd)
+                if path is None or (inside_project(path) and not is_top_level_zip(path)):
+                    raise AssertionError(f"init-project read a file: {file}")
             return real(file, *args, **kwargs)
         return guarded
 
@@ -102,6 +130,80 @@ def run_cli(root, *args):
         except SystemExit as exit_:
             code = exit_.code
     return code, output.getvalue()
+
+
+LINUX_DIR_FD = os.path.isdir("/proc/self/fd") and os.open in os.supports_dir_fd
+
+
+class ReadGuardTests(unittest.TestCase):
+    """The guard must flag file reads but allow directory opens (rmtree)."""
+
+    def make_tree(self, root):
+        project = root / "projects" / "demo"
+        folder = project / "submissions" / STUDENT_FOLDERS[0]
+        folder.mkdir(parents=True)
+        (folder / "analysis.py").write_text("print('synthetic')\n")
+        make_zip(project / ZIP_NAME)
+        return project, folder
+
+    def test_flags_file_reads_inside_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project, folder = self.make_tree(Path(directory))
+            target = folder / "analysis.py"
+            reads = [
+                lambda: open(target),
+                lambda: io.open(target, "rb"),
+                lambda: target.read_bytes(),
+                lambda: os.close(os.open(target, os.O_RDONLY)),
+            ]
+            for read in reads:
+                with no_submission_access(project), self.assertRaises(AssertionError):
+                    read()
+
+    def test_allows_directory_opens_writes_and_top_level_zip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project, folder = self.make_tree(Path(directory))
+            with no_submission_access(project):
+                try:
+                    os.close(os.open(folder, os.O_RDONLY))
+                except PermissionError:
+                    pass  # Windows can't os.open a directory; the guard allowed it.
+                (folder / "new.txt").write_text("written")
+                with zipfile.ZipFile(project / ZIP_NAME) as archive:
+                    archive.namelist()
+                with open(Path(directory) / "outside.txt", "w") as file:
+                    file.write("x")
+                with open(Path(directory) / "outside.txt") as file:
+                    file.read()
+
+    def test_allows_rmtree_inside_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project, folder = self.make_tree(Path(directory))
+            (folder / "plots").mkdir()
+            (folder / "plots" / "speed_plot.png").write_bytes(b"\x89PNG synthetic")
+            with no_submission_access(project):
+                shutil.rmtree(project / "submissions")
+            self.assertFalse((project / "submissions").exists())
+
+    @unittest.skipUnless(LINUX_DIR_FD, "needs /proc/self/fd and os.open dir_fd support")
+    def test_dir_fd_relative_opens(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project, folder = self.make_tree(Path(directory))
+            outside = Path(directory) / "outside"
+            outside.mkdir()
+            (outside / "data.txt").write_text("x")
+            dir_fd = os.open(folder, os.O_RDONLY)
+            outside_fd = os.open(outside, os.O_RDONLY)
+            try:
+                with no_submission_access(project):
+                    with self.assertRaises(AssertionError):
+                        os.open("analysis.py", os.O_RDONLY, dir_fd=dir_fd)
+                    (folder / "plots").mkdir()
+                    os.close(os.open("plots", os.O_RDONLY, dir_fd=dir_fd))
+                    os.close(os.open("data.txt", os.O_RDONLY, dir_fd=outside_fd))
+            finally:
+                os.close(dir_fd)
+                os.close(outside_fd)
 
 
 class NewProjectTests(unittest.TestCase):
