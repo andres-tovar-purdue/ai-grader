@@ -27,6 +27,8 @@ FORBIDDEN_MANIFEST_KEYS = {
     "username",
     "full_name",
     "selected_source_folder",
+    "newest_source_folder",
+    "original_path",
     "source_folder",
     "brightspace_prefix",
 }

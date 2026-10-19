@@ -92,8 +92,11 @@ python -m ai_grader prepare-submissions PROJECT_PATH
 
 This writes a sanitized `submission_manifest.json`, a private `student_map.json`,
 and physical agent-facing copies beneath
-`grader/anonymized_submissions/Student_###/`. Known usernames and student names are
-redacted from text and filenames. Image pixels are not redacted and may still
+`grader/anonymized_submissions/Student_###/`. A student's Brightspace attempts are
+merged: every file from every attempt is kept, and the newest attempt's copy wins
+when a file appears more than once. Known usernames and student names are
+redacted from text and filenames, including a first name or surname on its own
+(matched as a whole word, so "Chen" is not redacted inside "kitchen"). Image pixels are not redacted and may still
 require instructor review if visible identity is suspected.
 
 Rerunning `prepare-submissions` before grading replaces the earlier preparation

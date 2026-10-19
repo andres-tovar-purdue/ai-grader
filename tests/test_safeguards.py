@@ -11,7 +11,7 @@ from ai_grader.grading_validation import calculate_grading_result
 from ai_grader.spec_validation import latest_spec_path, validate_scoring_totals, validate_spec_data
 from ai_grader.spec_approval import approve_grading_spec
 from ai_grader.submission_checks import original_filename_checks, refresh_submission_checks, spec_fingerprint
-from ai_grader.submission_processing import write_submission_manifest
+from ai_grader.submission_processing import merge_attempt_files, write_submission_manifest
 import test_grading as grading_fixtures
 from test_grading import FakeResponses, model_response
 import test_grading_validation as validation_fixtures
@@ -168,7 +168,7 @@ class EvidenceAndFilenameTests(unittest.TestCase):
             folder = Path(directory)
             (folder/'abc123_pr01_analysis.csv').write_text('x\n1\n')
             spec={'deliverables':[dict(deliverable_id='analysis_csv',file_patterns=['username_pr01_analysis.csv'])]}
-            checks=original_filename_checks(folder,'abc123','Jane Student',spec)
+            checks=original_filename_checks(merge_attempt_files([folder]),'abc123','Jane Student',spec)
             serialized=json.dumps(checks)
             self.assertNotIn('abc123',serialized); self.assertNotIn('Jane',serialized)
             self.assertEqual(checks['checks'][0]['status'],'exact_match')
@@ -177,7 +177,7 @@ class EvidenceAndFilenameTests(unittest.TestCase):
     def test_real_typo_is_preserved_as_failed_compliance(self):
         with tempfile.TemporaryDirectory() as directory:
             folder=Path(directory); (folder/'abc123_pro1_analysis.csv').write_text('x\n1\n')
-            checks=original_filename_checks(folder,'abc123','Jane Student',{'deliverables':[
+            checks=original_filename_checks(merge_attempt_files([folder]),'abc123','Jane Student',{'deliverables':[
                 dict(deliverable_id='analysis_csv',file_patterns=['username_pr01_analysis.csv'])]})
             self.assertEqual(checks['checks'][0]['status'],'no_exact_match')
 

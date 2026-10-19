@@ -977,6 +977,17 @@ def main():
             f"{anonymized_path}"
         )
 
+        merged = [submission for submission in manifest["submissions"]
+                  if submission.get("attempt_count", 1) > 1]
+        if merged:
+            print()
+            print("Students with several attempts (files merged; newest copy kept):")
+            for submission in merged:
+                print(f"  {submission['student_id']}: "
+                      f"{submission['attempt_count']} attempts merged, "
+                      f"{submission['files_replaced_by_newer_attempts']} "
+                      "file(s) replaced by a newer attempt")
+
         unparsed_count = manifest.get("unparsed_folder_count", 0)
         if unparsed_count:
             print()

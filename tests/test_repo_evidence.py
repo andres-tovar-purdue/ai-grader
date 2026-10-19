@@ -349,8 +349,8 @@ class GitIsolationTests(unittest.TestCase):
 
 
 class SubmissionTimeTests(unittest.TestCase):
-    def test_cutoff_is_end_of_the_selected_attempts_minute(self):
-        identity = {"selected_source_folder": "b", "attempts": [
+    def test_cutoff_is_end_of_the_newest_attempts_minute(self):
+        identity = {"newest_source_folder": "b", "attempts": [
             {"source_folder": "a", "submitted_at": "2026-10-17T09:00:00"},
             {"source_folder": "b", "submitted_at": "2026-10-18T22:53:00"},
         ]}
