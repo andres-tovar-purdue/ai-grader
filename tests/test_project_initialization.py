@@ -212,7 +212,9 @@ class NewProjectTests(unittest.TestCase):
             root = Path(directory)
             plan = init_project("demo", workspace_path=root)
             project = root / "projects" / "demo"
-            self.assertEqual(plan["project_path"], project)
+            # init_project resolves the workspace; resolve here too so a Windows
+            # short-name TEMP (e.g. RUNNER~1 on CI) compares equal.
+            self.assertEqual(plan["project_path"], project.resolve())
             self.assertFalse(plan["exists"])
             self.assertEqual(sorted(p.name for p in project.iterdir()),
                              sorted(PROJECT_SUBFOLDERS))
