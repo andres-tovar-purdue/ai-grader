@@ -527,6 +527,8 @@ Known student usernames and names are redacted from text and filenames. Image pi
 
 AI Grader validates the anonymized manifest before grading.
 
+You can rerun `prepare-submissions` until grading starts, for example after adding a late submission. It builds and validates the new output first, then replaces the earlier `anonymized_submissions\`, `submission_manifest.json`, `student_map.json` and repository evidence. Once grading has started (anything in `grader\grading_runs\` or `grader\debug_responses\`), it refuses and changes nothing, because those files refer to the current `Student_###` numbers.
+
 ### GitHub repositories linked in submissions
 
 If students submit a link to a GitHub repository, for example in the Brightspace submission text, `prepare-submissions` also collects the repository as evidence. This happens only when Brightspace's `submissions\index.html` contains GitHub links; otherwise nothing changes.
@@ -835,7 +837,7 @@ Approve an instructor-reviewed grading specification.
 python -m ai_grader prepare-submissions PROJECT_PATH
 ```
 
-Parse, select, anonymize, and inventory student submissions.
+Parse, select, anonymize, and inventory student submissions. Can be rerun until grading starts; it then replaces the earlier preparation.
 
 ```text
 python -m ai_grader refresh-submission-checks PROJECT_PATH
@@ -943,13 +945,13 @@ Use `--allow-unresolved` only when the instructor intentionally accepts the rema
 
 ---
 
-## 32. `prepare-submissions` Refuses to Overwrite Anonymized Submissions
+## 32. `prepare-submissions` Refuses to Replace Prepared Submissions
 
 This is a safety feature.
 
-AI Grader does not silently replace an existing anonymized submission tree.
+Before grading, rerunning `prepare-submissions` replaces the earlier preparation. Once grading has started, meaning `grader\grading_runs\` or `grader\debug_responses\` holds anything, it refuses and changes nothing: grading runs and saved model responses refer to the current `Student_###` numbers, and a new preparation could number students differently.
 
-Before rebuilding anonymized submissions, confirm that the earlier generated artifacts are no longer needed. Archive or remove the generated submission-preparation artifacts intentionally, then rerun the command.
+To grade again with the current preparation, run `grade-submissions`. To prepare again anyway, first move `grader\grading_runs\` and `grader\debug_responses\` out of the project folder (archive them; do not delete approved or finalized grades), then rerun the command.
 
 Do not delete the original Brightspace submissions unless they have been backed up elsewhere.
 

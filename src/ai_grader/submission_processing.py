@@ -485,6 +485,51 @@ def publish_anonymized_tree(temporary_path, anonymized_path):
         pass
 
 
+# Grading output that refers to the current Student_### numbering. While any
+# of it exists, the prepared submissions must not be replaced.
+GRADING_EVIDENCE_FOLDERS = ("grading_runs", "debug_responses")
+
+
+class SubmissionsAlreadyGradedError(FileExistsError):
+    """prepare-submissions stopped because grading has used the prepared submissions."""
+
+
+def grading_started(grader_path):
+    """Return the first grading folder that holds anything, or None."""
+
+    for folder_name in GRADING_EVIDENCE_FOLDERS:
+        path = Path(grader_path) / folder_name
+        if path.is_dir() and any(path.iterdir()):
+            return path
+    return None
+
+
+def previous_preparation_paths(grader_path):
+    """Files and folders an earlier prepare-submissions run wrote, if any remain."""
+
+    from ai_grader.repo_evidence import (
+        REPOSITORY_CURRENT_FOLDER, REPOSITORY_MAP_FILENAME,
+    )
+    grader_path = Path(grader_path)
+    # Manifest first: once it is gone, a partly removed tree is never graded.
+    candidates = [
+        grader_path / "submission_manifest.json",
+        grader_path / "student_map.json",
+        grader_path / REPOSITORY_MAP_FILENAME,
+        grader_path / ANONYMIZED_SUBMISSIONS_FOLDER,
+        grader_path / REPOSITORY_CURRENT_FOLDER,
+    ]
+    return [path for path in candidates if path.exists()]
+
+
+def remove_previous_preparation(paths):
+    for path in paths:
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+
 def write_submission_manifest(project_path):
     """
     Process submissions and save:
@@ -494,6 +539,12 @@ def write_submission_manifest(project_path):
 
     2. student_map.json
        Local-only identity mapping. Never send to the AI.
+
+    Rerunning on a project that was prepared but not yet graded replaces the
+    earlier anonymized output, manifest and maps, but only after the new
+    output has been built and validated. Once grading has started
+    (grading_runs\\ or debug_responses\\ holds anything), it refuses and
+    changes nothing.
     """
 
     project_path = Path(project_path).resolve()
@@ -505,18 +556,18 @@ def write_submission_manifest(project_path):
     )
 
     anonymized_path = grader_path / ANONYMIZED_SUBMISSIONS_FOLDER
-    if anonymized_path.exists():
-        raise FileExistsError(
-            "Refusing to overwrite anonymized submissions: "
-            f"{anonymized_path}"
-        )
 
     from ai_grader.repo_evidence import REPOSITORY_CURRENT_FOLDER
     current_path = grader_path / REPOSITORY_CURRENT_FOLDER
-    if current_path.exists():
-        raise FileExistsError(
-            "Refusing to overwrite the kept current repository state: "
-            f"{current_path}"
+
+    previous_paths = previous_preparation_paths(grader_path)
+    grading_path = grading_started(grader_path) if previous_paths else None
+    if grading_path is not None:
+        raise SubmissionsAlreadyGradedError(
+            "Refusing to replace the prepared submissions: grading has already "
+            f"used them ({grading_path}). Nothing was changed. Student numbers "
+            "in grading runs and saved responses refer to the current "
+            "preparation."
         )
 
     temporary_path = Path(tempfile.mkdtemp(
@@ -588,6 +639,8 @@ def write_submission_manifest(project_path):
         validate_anonymized_manifest(manifest, student_map)
         if repository_map is not None:
             verify_repository_redaction(manifest, repository_map)
+        # The new output is complete and validated; only now remove the old.
+        remove_previous_preparation(previous_paths)
         # Publish the ungraded current state first, and undo it if the graded
         # tree fails, so a failed run leaves nothing that blocks a rerun.
         if any(current_temporary.iterdir()):

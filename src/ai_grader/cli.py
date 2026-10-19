@@ -23,7 +23,9 @@ from ai_grader.setup_check import run_setup_checks
 from ai_grader.spec_approval import approve_grading_spec
 from ai_grader.spec_generation import InvalidSpecResponseError, generate_grading_spec
 from ai_grader.spec_validation import validate_grading_spec
-from ai_grader.submission_processing import write_submission_manifest
+from ai_grader.submission_processing import (
+    SubmissionsAlreadyGradedError, previous_preparation_paths, write_submission_manifest,
+)
 from ai_grader.submission_checks import refresh_submission_checks
 
 
@@ -929,11 +931,24 @@ def main():
         )
 
     elif args.command == "prepare-submissions":
-        manifest_path, map_path, manifest = (
-            write_submission_manifest(
-                args.project_path
+        replacing = bool(previous_preparation_paths(
+            Path(args.project_path).resolve() / "grader"
+        ))
+        try:
+            manifest_path, map_path, manifest = (
+                write_submission_manifest(
+                    args.project_path
+                )
             )
-        )
+        except SubmissionsAlreadyGradedError as error:
+            print()
+            print(error)
+            print()
+            print("To grade again with the current preparation, run grade-submissions.")
+            print("To prepare again anyway, first move grader\\grading_runs\\ and")
+            print("grader\\debug_responses\\ out of the project folder (archive them;")
+            print("they match the current student numbers), then rerun this command.")
+            raise SystemExit(1)
 
         anonymized_path = (
             Path(args.project_path).resolve()
@@ -942,6 +957,9 @@ def main():
         )
 
         print()
+        if replacing:
+            print("Replaced the earlier anonymized submissions, manifest and "
+                  "student map (the project had not been graded).")
         print(
             f"Submission manifest written to: "
             f"{manifest_path}"

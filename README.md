@@ -96,6 +96,10 @@ and physical agent-facing copies beneath
 redacted from text and filenames. Image pixels are not redacted and may still
 require instructor review if visible identity is suspected.
 
+Rerunning `prepare-submissions` before grading replaces the earlier preparation
+(for example, after adding a late submission). Once `grader/grading_runs/` or
+`grader/debug_responses/` holds anything, it refuses and changes nothing.
+
 After the grading specification is instructor-approved, run:
 
 ```powershell
