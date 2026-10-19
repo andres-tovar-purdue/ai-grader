@@ -179,19 +179,34 @@ def test_api_connection(python, repository_root, run=None):
     return result.returncode == 0, lines
 
 
+def print_activation(repository_root):
+    print("  cd ..")
+    print(f"  .\\{repository_root.name}\\.venv\\Scripts\\Activate.ps1")
+
+
 def print_next_steps(repository_root):
     parent = repository_root.parent
     print()
     print(f"Work from {parent} (the folder that holds {repository_root.name}\\ "
           "and projects\\). Activate the environment there with:")
     print()
-    print("  cd ..")
-    print(f"  .\\{repository_root.name}\\.venv\\Scripts\\Activate.ps1")
+    print_activation(repository_root)
     print()
     print("Next step:")
     print()
     print("  python -m ai_grader check-setup")
     print("  python -m ai_grader init-project PROJECT_ID")
+
+
+def print_fix_steps(repository_root, env_path):
+    """After a failed API test: everything else is set up, so no rerun is needed."""
+
+    print()
+    print(f"Fix OPENAI_API_KEY (or OPENAI_MODEL) in {env_path} with a text editor.")
+    print("Then check again; there is no need to rerun install.py:")
+    print()
+    print_activation(repository_root)
+    print("  python -m ai_grader check-setup")
 
 
 def main():
@@ -228,15 +243,14 @@ def main():
     ok, lines = test_api_connection(python, REPOSITORY_ROOT)
     for line in lines:
         print(f"  {line}")
-    if ok:
-        print("API connection: OK")
-    else:
+    if not ok:
         print("API connection failed.")
-        print(f"Check OPENAI_API_KEY and OPENAI_MODEL in {ENV_PATH}, then rerun "
-              "install.py.")
+        print_fix_steps(REPOSITORY_ROOT, ENV_PATH)
+        return 1
 
+    print("API connection: OK")
     print_next_steps(REPOSITORY_ROOT)
-    return 0 if ok else 1
+    return 0
 
 
 if __name__ == "__main__":

@@ -259,7 +259,8 @@ class MainTests(unittest.TestCase):
             self.assertIn("OPENAI_MODEL=test-model", env_text)
             self.assertNotIn(FAKE_KEY, first.getvalue())
             self.assertIn("Activate.ps1", first.getvalue())
-            self.assertIn("check-setup", first.getvalue())
+            self.assertIn("Next step:", first.getvalue())
+            self.assertIn("init-project PROJECT_ID", first.getvalue())
 
             # Second run: nothing is asked and nothing is replaced.
             with patch.multiple(install, **paths), \
@@ -272,6 +273,45 @@ class MainTests(unittest.TestCase):
 
             self.assertEqual((repo / ".env").read_text(encoding="utf-8"), env_text)
             self.assertIn("Keeping existing", second.getvalue())
+
+    def test_failed_api_test_prints_fix_steps_not_next_step(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "ai-grader"
+            venv = repo / ".venv"
+            python = install.venv_python(venv)
+            python.parent.mkdir(parents=True)
+            python.write_text("")
+            (repo / ".env").write_text("OPENAI_API_KEY=bad\n", encoding="utf-8")
+            (repo.parent / "projects").mkdir()
+
+            def fake_run(command, **kwargs):
+                if "pip" in command:
+                    return SimpleNamespace(returncode=0)
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="Model: test-model (from OPENAI_MODEL)\nAuthenticationError: 401\n",
+                    stderr="")
+
+            with patch.multiple(install, REPOSITORY_ROOT=repo, VENV_PATH=venv,
+                                ENV_PATH=repo / ".env",
+                                ENV_EXAMPLE_PATH=repo / ".env.example",
+                                PROJECTS_PATH=repo.parent / "projects"), \
+                 patch.object(install.subprocess, "run", side_effect=fake_run), \
+                 patch("builtins.input", side_effect=AssertionError), \
+                 patch("sys.stdout", new=io.StringIO()) as output:
+                self.assertEqual(install.main(), 1)
+
+            text = output.getvalue()
+            self.assertIn("API connection failed.", text)
+            self.assertIn("AuthenticationError: 401", text)
+            self.assertIn(f"Fix OPENAI_API_KEY (or OPENAI_MODEL) in {repo / '.env'}", text)
+            self.assertIn("no need to rerun install.py", text)
+            self.assertIn("Activate.ps1", text)
+            self.assertIn("python -m ai_grader check-setup", text)
+            self.assertNotIn("Next step:", text)
+            self.assertNotIn("init-project", text)
+            self.assertEqual((repo / ".env").read_text(encoding="utf-8"),
+                             "OPENAI_API_KEY=bad\n")
 
 
 if __name__ == "__main__":

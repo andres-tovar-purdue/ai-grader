@@ -145,7 +145,7 @@ Use any Python 3.10 or newer; no virtual environment is needed yet. The script:
    - `OPENAI_MODEL`, for example `gpt-5.4-mini` (required);
    - `GRADER_INSTRUCTOR_NAME`, the person who reviews and approves grading specifications (optional now; `approve-spec` needs it);
 6. makes one small test request to the OpenAI API;
-7. prints the command to activate the environment and the next step.
+7. prints the command to activate the environment and the next step. If the API test fails, it instead says to fix the key in `.env` and run `python -m ai_grader check-setup`; there is no need to rerun `install.py`.
 
 It is safe to rerun at any time. It keeps an existing virtual environment and never overwrites or reads an existing `.env`.
 
