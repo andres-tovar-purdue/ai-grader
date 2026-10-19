@@ -21,7 +21,7 @@ from ai_grader.repo_evidence import NO_LINK_REASONS
 from ai_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
 from ai_grader.setup_check import run_setup_checks
 from ai_grader.spec_approval import approve_grading_spec
-from ai_grader.spec_generation import generate_grading_spec
+from ai_grader.spec_generation import InvalidSpecResponseError, generate_grading_spec
 from ai_grader.spec_validation import validate_grading_spec
 from ai_grader.submission_processing import write_submission_manifest
 from ai_grader.submission_checks import refresh_submission_checks
@@ -778,10 +778,27 @@ def main():
         )
 
         print(describe_model())
-        output_path, spec = generate_grading_spec(
-            args.project_path,
-            schema_path,
-        )
+        try:
+            output_path, spec = generate_grading_spec(
+                args.project_path,
+                schema_path,
+            )
+        except InvalidSpecResponseError as error:
+            print()
+            print("The generated grading specification failed validation.")
+            print("No draft specification was written.")
+            print()
+            print("Problems:")
+            for message in error.messages[:20]:
+                print(f"  - {message}")
+            if len(error.messages) > 20:
+                print(f"  ... and {len(error.messages) - 20} more")
+            print()
+            print("The model's raw response was saved to:")
+            print(f"  {error.response_path}")
+            print()
+            print("Rerun generate-spec to try again.")
+            raise SystemExit(1)
 
         print()
         print(
