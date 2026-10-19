@@ -10,7 +10,9 @@ from ai_grader.finalization import finalize_grading, load_approved_scores
 from ai_grader.grading import grade_submissions
 from ai_grader.recovery import recover_grading
 from ai_grader.reporting import generate_review_report, open_report
-from ai_grader.project_initialization import PROJECT_SUBFOLDERS, init_project
+from ai_grader.project_initialization import (
+    ProjectInitializationError, count_items, describe_move_counts, init_project,
+)
 from ai_grader.project_inspection import inspect_project
 from ai_grader.project_manifest import write_project_manifest
 from ai_grader.project_preparation import prepare_project
@@ -31,6 +33,91 @@ def print_next_command(command):
     print("Next command:")
     print()
     print(command)
+
+
+def print_init_changes(plan, dry_run):
+    """Print what init-project moved or extracted, as counts only, never names."""
+    moved = count_items(plan, "move")
+    extracted = count_items(plan, "extract")
+    already = count_items(plan, "already_present")
+
+    print()
+    if any(moved) or not plan["zips"]:
+        print(f"{'Would move' if dry_run else 'Moved'} into submissions\\: "
+              f"{describe_move_counts(*moved)}")
+
+    if plan["zips"]:
+        print(f"{'Would extract' if dry_run else 'Extracted'} from Brightspace "
+              f"ZIP into submissions\\: {describe_move_counts(*extracted)}")
+        for zip_record in plan["zips"]:
+            note = "kept"
+            if zip_record["other_count"]:
+                note += (f"; {zip_record['other_count']} other file(s) in it "
+                         "are not extracted")
+            print(f"  - {zip_record['name']} ({note})")
+
+    if any(already):
+        print(f"Already in submissions\\ (skipped): {describe_move_counts(*already)}")
+
+    for wrapper in plan["wrappers"]:
+        if wrapper["remaining"] == 0:
+            verb = "Would remove" if dry_run else (
+                "Removed" if wrapper["removed"] else "Could not remove")
+            print(f"{verb} the emptied download folder: {wrapper['name']}")
+
+    other_count = plan["brightspace_named_not_moved"]
+    kept_wrappers = [w["name"] for w in plan["wrappers"] if w["remaining"]]
+
+    if plan["not_moved"] or other_count or kept_wrappers:
+        print()
+        print("Not moved (left in place):")
+        for name in plan["not_moved"]:
+            print(f"  - {name}")
+        for name in kept_wrappers:
+            print(f"  - {name} (download folder that still holds other items)")
+        if other_count:
+            print(
+                f"  - {other_count} Brightspace-named file(s) that are not "
+                "submission folders"
+            )
+
+
+def print_init_dry_run(plan):
+    """Print the init-project plan with counts only, never student names."""
+    project_path = plan["project_path"]
+
+    print()
+    print("Dry run: nothing was changed.")
+    print()
+    if plan["exists"]:
+        print(f"Existing project folder: {project_path}")
+    else:
+        print(f"Would create project folder: {project_path}")
+
+    print()
+    if plan["missing_subfolders"]:
+        print("Would create folders:")
+        for folder_name in plan["missing_subfolders"]:
+            print(f"  - {folder_name}\\")
+    else:
+        print("All standard folders already exist.")
+
+    if not plan["exists"]:
+        return
+
+    print_init_changes(plan, dry_run=True)
+
+    conflicts = count_items(plan, "conflict")
+    if any(conflicts):
+        print()
+        print(
+            "init-project would stop without changing anything: these already "
+            "exist in submissions\\ (or appear twice) with different contents: "
+            + describe_move_counts(*conflicts)
+        )
+    elif not plan["items"]:
+        print()
+        print("No Brightspace submission folders, index.html or ZIP found.")
 
 
 def project_path_from_spec(spec_path):
@@ -137,7 +224,18 @@ def main():
 
     init_parser.add_argument(
         "project_name",
-        help="Name of the grading project, e.g. mspe_49600_fa26_pr01."
+        help=(
+            "Name of the grading project, e.g. mspe_49600_fa26_pr01. If "
+            "projects\\NAME already exists (for example, holding a Brightspace "
+            "ZIP or its extracted folders), missing folders are added and the "
+            "Brightspace submissions are extracted or moved into submissions\\."
+        ),
+    )
+
+    init_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be created and moved without changing anything.",
     )
 
     # prepare-project command
@@ -313,22 +411,50 @@ def main():
 
     # command handling section
     if args.command == "init-project":
-        project_path = init_project(args.project_name)
+        try:
+            plan = init_project(args.project_name, dry_run=args.dry_run)
+        except ProjectInitializationError as error:
+            print()
+            print(error)
+            raise SystemExit(1)
+
+        if plan.get("location_note"):
+            print()
+            print(plan["location_note"])
+
+        project_path = plan["project_path"]
+        placed_count = sum(
+            sum(count_items(plan, action))
+            for action in ("move", "extract", "already_present")
+        )
+
+        if args.dry_run:
+            print_init_dry_run(plan)
+            return
 
         print()
         print("Project initialized successfully:")
         print(f"  {project_path}")
         print()
-        print("Created folders:")
 
-        for folder_name in PROJECT_SUBFOLDERS:
-            print(f"  - {folder_name}\\")
+        if plan["missing_subfolders"]:
+            print("Created folders:")
+            for folder_name in plan["missing_subfolders"]:
+                print(f"  - {folder_name}\\")
+        else:
+            print("All standard folders already existed.")
+
+        if plan["exists"]:
+            print_init_changes(plan, dry_run=False)
 
         print()
         print("Before continuing:")
         print("  1. Place the official assignment instructions in project\\")
         print("  2. Place any instructor-provided datasets in datasets\\")
-        print("  3. Place downloaded Brightspace submissions in submissions\\")
+        if placed_count:
+            print("  3. Confirm that submissions\\ holds every Brightspace submission folder")
+        else:
+            print("  3. Place downloaded Brightspace submissions in submissions\\")
 
         print_next_command(
             f'python -m ai_grader inspect "{project_path}"'
@@ -417,8 +543,9 @@ def main():
                 print(f"  - {folder_name}\\")
             print()
             print(
-                "If this is a new project, create it with init-project "
-                "instead of building the folders manually."
+                "Run init-project with this project's name from the workspace "
+                "root to add the missing folders; existing files are kept. "
+                "Add --dry-run to preview."
             )
 
         else:
