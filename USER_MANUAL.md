@@ -555,7 +555,9 @@ You can rerun `prepare-submissions` until grading starts, for example after addi
 
 If students submit a link to a GitHub repository, for example in the Brightspace submission text, `prepare-submissions` also collects the repository as evidence. Links come from Brightspace's `submissions\index.html`. For a student with no repository link there, AI Grader also uses GitHub repository links found in that student's PDF or notebook text (read before redaction). Without any GitHub links, nothing changes.
 
-A link taken from a PDF or notebook is labeled as such in the facts file, and the student is flagged for review: a report may cite someone else's repository, such as a library it used. Its owner is redacted from all of that student's text as `<repo_owner>`, and the owner and URL are kept only in the private `grader\repository_map.json`.
+A link taken from a PDF or notebook is labeled as such in the facts file, and the student is flagged for review: a report may cite someone else's repository, such as a library it used.
+
+The owners of a student's GitHub links, whether from `index.html` or from their PDFs and notebooks, are redacted from all of that student's files: as `<repo_owner>` in text and extracted PDF text, and as `owner` in file names. Owners and URLs are kept only in the private `grader\repository_map.json` and `student_map.json`.
 
 Links are recognized with or without `https://` or `www.` (for example `github.com/owner/repo`), with a `.git` ending or a path such as `/tree/main`, and in the SSH form `git@github.com:owner/repo.git`.
 
