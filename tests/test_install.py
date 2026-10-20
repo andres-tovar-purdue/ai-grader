@@ -180,43 +180,22 @@ class EnvFileTests(unittest.TestCase):
                          "# A=\nA=1\nB=\nC=3\n")
 
 
-class ConnectionTests(unittest.TestCase):
-    def test_success_uses_venv_python(self):
+class CheckSetupTests(unittest.TestCase):
+    def test_runs_check_setup_with_venv_python_from_workspace(self):
         calls = []
 
         def run(command, **kwargs):
             calls.append((command, kwargs))
-            return SimpleNamespace(
-                returncode=0,
-                stdout="Model: test-model (from OPENAI_MODEL)\nAPI connection successful.\n",
-                stderr="")
+            return SimpleNamespace(returncode=0)
 
-        ok, lines = install.test_api_connection(Path("venv-python"), Path("repo"), run=run)
-        self.assertTrue(ok)
-        self.assertEqual(lines, ["Model: test-model (from OPENAI_MODEL)",
-                                 "API connection successful."])
-        self.assertEqual(calls[0][0][:2], ["venv-python", "-c"])
-        self.assertIn("print(describe_model())", calls[0][0][2])
-        self.assertIn("test_connection()", calls[0][0][2])
+        self.assertTrue(install.run_check_setup(Path("venv-python"), Path("workspace"),
+                                                run=run))
+        self.assertEqual(calls, [(["venv-python", "-m", "ai_grader", "check-setup"],
+                                  {"cwd": "workspace"})])
 
-    def test_api_failure_reports_model_and_error(self):
-        def run(command, **kwargs):
-            return SimpleNamespace(
-                returncode=1,
-                stdout="Model: test-model (from OPENAI_MODEL)\nAuthenticationError: 401\n",
-                stderr="")
-
-        self.assertEqual(install.test_api_connection(Path("p"), Path("r"), run=run),
-                         (False, ["Model: test-model (from OPENAI_MODEL)",
-                                  "AuthenticationError: 401"]))
-
-    def test_failure_before_output_reports_last_error_line(self):
-        def run(command, **kwargs):
-            return SimpleNamespace(returncode=1, stdout="",
-                                   stderr="Traceback\nModuleNotFoundError: x\n")
-
-        self.assertEqual(install.test_api_connection(Path("p"), Path("r"), run=run),
-                         (False, ["ModuleNotFoundError: x"]))
+    def test_failed_check_returns_false(self):
+        self.assertFalse(install.run_check_setup(
+            Path("p"), Path("w"), run=lambda command, **kwargs: SimpleNamespace(returncode=1)))
 
 
 class MainTests(unittest.TestCase):
@@ -235,8 +214,11 @@ class MainTests(unittest.TestCase):
                 python.parent.mkdir(parents=True)
                 python.write_text("")
 
+            calls = []
+
             def fake_run(command, **kwargs):
-                return SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+                calls.append((command, kwargs))
+                return SimpleNamespace(returncode=0)
 
             paths = {
                 "REPOSITORY_ROOT": repo,
@@ -261,6 +243,8 @@ class MainTests(unittest.TestCase):
             self.assertIn("Activate.ps1", first.getvalue())
             self.assertIn("Next step:", first.getvalue())
             self.assertIn("init-project PROJECT_ID", first.getvalue())
+            self.assertIn((["check-setup"], {"cwd": str(repo.parent)}),
+                          [(command[-1:], kwargs) for command, kwargs in calls])
 
             # Second run: nothing is asked and nothing is replaced.
             with patch.multiple(install, **paths), \
@@ -274,7 +258,7 @@ class MainTests(unittest.TestCase):
             self.assertEqual((repo / ".env").read_text(encoding="utf-8"), env_text)
             self.assertIn("Keeping existing", second.getvalue())
 
-    def test_failed_api_test_prints_fix_steps_not_next_step(self):
+    def test_failed_check_prints_fix_steps_not_next_step(self):
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory) / "ai-grader"
             venv = repo / ".venv"
@@ -283,14 +267,13 @@ class MainTests(unittest.TestCase):
             python.write_text("")
             (repo / ".env").write_text("OPENAI_API_KEY=bad\n", encoding="utf-8")
             (repo.parent / "projects").mkdir()
+            calls = []
 
             def fake_run(command, **kwargs):
+                calls.append(command)
                 if "pip" in command:
                     return SimpleNamespace(returncode=0)
-                return SimpleNamespace(
-                    returncode=1,
-                    stdout="Model: test-model (from OPENAI_MODEL)\nAuthenticationError: 401\n",
-                    stderr="")
+                return SimpleNamespace(returncode=1)
 
             with patch.multiple(install, REPOSITORY_ROOT=repo, VENV_PATH=venv,
                                 ENV_PATH=repo / ".env",
@@ -302,12 +285,10 @@ class MainTests(unittest.TestCase):
                 self.assertEqual(install.main(), 1)
 
             text = output.getvalue()
-            self.assertIn("API connection failed.", text)
-            self.assertIn("AuthenticationError: 401", text)
-            self.assertIn(f"Fix OPENAI_API_KEY (or OPENAI_MODEL) in {repo / '.env'}", text)
-            self.assertIn("no need to rerun install.py", text)
-            self.assertIn("Activate.ps1", text)
-            self.assertIn("python -m ai_grader check-setup", text)
+            self.assertEqual(calls[-1][-2:], ["ai_grader", "check-setup"])
+            self.assertIn("run this script again", text)
+            self.assertIn(str(repo / ".env"), text)
+            self.assertIn("python install.py", text)
             self.assertNotIn("Next step:", text)
             self.assertNotIn("init-project", text)
             self.assertEqual((repo / ".env").read_text(encoding="utf-8"),
