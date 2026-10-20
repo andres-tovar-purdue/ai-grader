@@ -4,8 +4,13 @@ import json
 import re
 import shutil
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+
+from ai_grader.archives import (
+    contents_folder, extract_archive, is_archive, problem_counts,
+)
 
 
 TEXT_EXTENSIONS = {
@@ -279,19 +284,24 @@ def redact_owners(text, owners):
     return text
 
 
-def anonymize_relative_path(relative_path, index, username, full_name, owners=()):
-    """
-    Create a deterministic, identity-free relative artifact path. The
-    student's GitHub repository owners, if given, become "owner".
-    """
+def anonymize_folder(relative_path, username, full_name, owners=()):
+    """Redact each part of a relative path: names become "student", owners "owner"."""
     parts = []
-    for part in relative_path.parts:
+    for part in Path(relative_path).parts:
         safe_part = redact_identity(redact_owners(part, owners), username, full_name)
         safe_part = safe_part.replace("<username>", "student")
         safe_part = safe_part.replace("<student_name>", "student")
         safe_part = safe_part.replace("<repo_owner>", "owner")
         parts.append(safe_part)
+    return Path(*parts)
 
+
+def anonymize_relative_path(relative_path, index, username, full_name, owners=()):
+    """
+    Create a deterministic, identity-free relative artifact path. The
+    student's GitHub repository owners, if given, become "owner".
+    """
+    parts = list(anonymize_folder(relative_path, username, full_name, owners).parts)
     parts[-1] = f"artifact_{index:03d}_{parts[-1]}"
     return Path(*parts)
 
@@ -327,6 +337,93 @@ def merge_attempt_files(attempt_folders):
                 ),
             }
     return sorted(merged.values(), key=lambda entry: entry["relative_path"])
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def content_key(path):
+    """
+    A fingerprint for finding duplicate files: text files by their decoded
+    text with line endings normalized (a zip made on one system and a copy
+    checked out on another often differ only in CRLF/LF), other files by
+    their bytes.
+    """
+    path = Path(path)
+    if classify_file(path) == "text":
+        return "text:" + hashlib.sha256(
+            decode_text(path.read_bytes()).encode("utf-8")).hexdigest()
+    return "bytes:" + file_sha256(path)
+
+
+def expand_archives(entries, extraction_root):
+    """
+    Return entries (see merge_attempt_files) followed by the files extracted
+    from the ZIP archives among them, sorted by relative path.
+
+    An archive's files get the relative path "<archive>_contents/<member>"
+    and "extracted_from" (the archive's relative path). Files identical to a
+    file submitted outside an archive (see content_key) are not added again. Each archive
+    entry gains "archive": the extraction status, counts of skipped members,
+    files_added, and identical_to (relative paths of the matching files).
+    """
+
+    extraction_root = Path(extraction_root)
+    outside = {}
+    for entry in entries:
+        if not is_archive(entry["path"]):
+            outside.setdefault(content_key(entry["path"]), entry["relative_path"])
+
+    members = []
+    for number, entry in enumerate(entries, start=1):
+        if not is_archive(entry["path"]):
+            continue
+        destination = extraction_root / f"archive_{number:03d}"
+        report = extract_archive(entry["path"], destination)
+        folder = contents_folder(entry["relative_path"])
+        identical_to = []
+        added = 0
+        for member in report["files"]:
+            path = destination / member
+            same = outside.get(content_key(path))
+            if same is not None:
+                identical_to.append(same)
+                continue
+            added += 1
+            members.append({
+                "path": path,
+                "relative_path": folder / member,
+                "attempt": entry["attempt"],
+                "source_folder": entry["source_folder"],
+                "replaced_attempts": [],
+                "extracted_from": entry["relative_path"],
+            })
+        entry["archive"] = {
+            "status": report["status"],
+            "files_added": added,
+            "identical_to": identical_to,
+            "skipped": problem_counts(report["skipped"]),
+            "nested_archives": report["nested_archives"],
+        }
+    return entries + sorted(members, key=lambda entry: entry["relative_path"])
+
+
+@contextmanager
+def student_entries(attempt_folders):
+    """
+    A student's merged submission files plus the files extracted from their
+    ZIP archives (see expand_archives). Extracted files live in a temporary
+    folder that is removed when the block ends; submissions\\ is not changed.
+    """
+
+    with tempfile.TemporaryDirectory(prefix="ai_grader_archives_",
+                                     ignore_cleanup_errors=True) as root:
+        yield expand_archives(merge_attempt_files(attempt_folders), root)
 
 
 def identity_attempt_folders(project_path, identity):
@@ -448,16 +545,18 @@ def inventory_submission_files(
         return redact_identity(redact_owners(text, owners), username, full_name)
 
     files = []
+    artifact_paths = [
+        anonymize_relative_path(entry["relative_path"], index, username,
+                                full_name, owners)
+        for index, entry in enumerate(entries, start=1)
+    ]
+    artifact_by_original = {
+        entry["relative_path"]: artifact.as_posix()
+        for entry, artifact in zip(entries, artifact_paths)
+    }
 
-    for index, entry in enumerate(entries, start=1):
+    for entry, relative_path in zip(entries, artifact_paths):
         path = entry["path"]
-        relative_path = anonymize_relative_path(
-            entry["relative_path"],
-            index,
-            username,
-            full_name,
-            owners,
-        )
         file_type = classify_file(path)
 
         file_info = {
@@ -466,6 +565,23 @@ def inventory_submission_files(
             "extension": path.suffix.lower(),
             "size_bytes": path.stat().st_size,
         }
+        if "extracted_from" in entry:
+            file_info["extracted_from"] = artifact_by_original[entry["extracted_from"]]
+        if "archive" in entry:
+            archive = entry["archive"]
+            file_info["archive_extraction"] = {
+                "method": "zip_local_v1",
+                "status": archive["status"],
+                "contents_folder": anonymize_folder(
+                    contents_folder(entry["relative_path"]), username,
+                    full_name, owners).as_posix(),
+                "files_added": archive["files_added"],
+                "identical_to_artifacts": [
+                    artifact_by_original[original] for original in archive["identical_to"]
+                ],
+                "skipped_members": archive["skipped"],
+                "nested_archives_not_extracted": archive["nested_archives"],
+            }
 
         if file_type == "text":
             file_info["content"] = redact(raw_text[path])
@@ -619,20 +735,17 @@ def process_submissions(project_path, anonymized_root=None):
         if anonymized_root is not None:
             destination_folder = Path(anonymized_root) / student_id
 
-        entries = merge_attempt_files(
-            attempt["folder"] for attempt in attempts
-        )
-        files_replaced = sum(1 for entry in entries if entry["replaced_attempts"])
-
         record = index_links.get(student_id) or {}
-        files, document_links, redacted_owners = inventory_submission_files(
-            entries,
-            username,
-            newest_attempt["full_name"],
-            destination_folder,
-            [owner for owner, _ in record.get("repositories", [])]
-            + list(record.get("profiles", [])),
-        )
+        with student_entries(attempt["folder"] for attempt in attempts) as entries:
+            files_replaced = sum(1 for entry in entries if entry["replaced_attempts"])
+            files, document_links, redacted_owners = inventory_submission_files(
+                entries,
+                username,
+                newest_attempt["full_name"],
+                destination_folder,
+                [owner for owner, _ in record.get("repositories", [])]
+                + list(record.get("profiles", [])),
+            )
 
         review_flags = []
 
@@ -697,6 +810,8 @@ def process_submissions(project_path, anonymized_root=None):
                     "attempt": entry["attempt"],
                     "source_folder": entry["source_folder"],
                     "replaced_attempts": entry["replaced_attempts"],
+                    **({"extracted_from": entry["extracted_from"].as_posix()}
+                       if "extracted_from" in entry else {}),
                 }
                 for entry, file_info in zip(entries, files)
             ],
@@ -903,11 +1018,12 @@ def write_submission_manifest(project_path):
             spec = json.loads(spec_path.read_text(encoding="utf-8"))
             for submission in submissions:
                 identity = student_map[submission["student_id"]]
-                submission["deliverable_checks"] = original_filename_checks(
-                    merge_attempt_files(identity_attempt_folders(project_path, identity)),
-                    identity["username"], identity["full_name"], spec,
-                    identity["redacted_repository_owners"],
-                )
+                with student_entries(
+                        identity_attempt_folders(project_path, identity)) as entries:
+                    submission["deliverable_checks"] = original_filename_checks(
+                        entries, identity["username"], identity["full_name"], spec,
+                        identity["redacted_repository_owners"],
+                    )
 
         from ai_grader.repo_evidence import (
             attach_repository_evidence, verify_repository_redaction,

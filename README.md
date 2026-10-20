@@ -109,6 +109,12 @@ grader. PDFs without extractable text are flagged for manual review. GitHub link
 in a student's PDF or notebook are used as repository evidence when index.html has
 none for that student, and the student is flagged for review.
 
+ZIP files in submissions and linked repositories are extracted locally (originals
+unchanged): each file becomes its own redacted artifact under
+`<name>.zip_contents/`, files identical to ones submitted separately are not
+repeated, and unsafe, encrypted, damaged or oversized entries are skipped. Archives
+that cannot be fully extracted are flagged for review, not penalized.
+
 Rerunning `prepare-submissions` before grading replaces the earlier preparation
 (for example, after adding a late submission). Once `grader/grading_runs/` or
 `grader/debug_responses/` holds anything, it refuses and changes nothing; set

@@ -53,6 +53,18 @@ def artifact_review_reasons(submission):
                 reasons.append(
                     f"Only part of the text of {file['path']} was given to the "
                     "grader; review the rest of the PDF manually.")
+        elif "archive_extraction" in file:
+            archive = file["archive_extraction"]
+            if archive["status"] != "extracted":
+                reasons.append(
+                    f"ZIP archive {file['path']} could not be fully extracted "
+                    f"({archive['status']}); files not extracted were not "
+                    "inspected. Review the archive manually.")
+            if archive["nested_archives_not_extracted"]:
+                reasons.append(
+                    f"ZIP archive {file['path']} contains "
+                    f"{archive['nested_archives_not_extracted']} ZIP file(s) that "
+                    "were not extracted. Review them manually.")
         elif extension == ".ipynb" and "content" in file:
             if load_notebook(file["content"])[0] is None:
                 reasons.append(

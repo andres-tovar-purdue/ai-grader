@@ -1009,6 +1009,28 @@ def main():
                       f"{submission['files_replaced_by_newer_attempts']} "
                       "file(s) replaced by a newer attempt")
 
+        archive_lines = []
+        for submission in manifest["submissions"]:
+            for file_info in submission["files"]:
+                archive = file_info.get("archive_extraction")
+                if archive is None:
+                    continue
+                where = ("GitHub repository"
+                         if file_info.get("source") == "github_repository" else "submission")
+                line = (f"  {submission['student_id']}: ZIP in {where}: "
+                        f"{archive['status']}, {archive['files_added']} file(s) added")
+                if archive["identical_to_artifacts"]:
+                    line += (f", {len(archive['identical_to_artifacts'])} identical "
+                             "to other files (not repeated)")
+                if archive["status"] != "extracted" or archive["nested_archives_not_extracted"]:
+                    line += " - needs review"
+                archive_lines.append(line)
+        if archive_lines:
+            print()
+            print("ZIP archives extracted (originals unchanged):")
+            for line in archive_lines:
+                print(line)
+
         unparsed_count = manifest.get("unparsed_folder_count", 0)
         if unparsed_count:
             print()
