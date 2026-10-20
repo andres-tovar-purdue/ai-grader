@@ -239,13 +239,27 @@ def redact_identity(text, username, full_name):
     return redact_name_parts(text, full_name)
 
 
-def anonymize_relative_path(relative_path, index, username, full_name):
-    """Create a deterministic, identity-free relative artifact path."""
+def redact_owners(text, owners):
+    """Replace GitHub repository owners as whole words, before identity redaction."""
+    from ai_grader.repo_evidence import owner_forms, owner_pattern
+    for owner in owners:
+        # An owner too short to redact safely has no forms and is skipped.
+        if owner_forms(owner):
+            text = owner_pattern(owner).sub("<repo_owner>", text)
+    return text
+
+
+def anonymize_relative_path(relative_path, index, username, full_name, owners=()):
+    """
+    Create a deterministic, identity-free relative artifact path. The
+    student's GitHub repository owners, if given, become "owner".
+    """
     parts = []
     for part in relative_path.parts:
-        safe_part = redact_identity(part, username, full_name)
+        safe_part = redact_identity(redact_owners(part, owners), username, full_name)
         safe_part = safe_part.replace("<username>", "student")
         safe_part = safe_part.replace("<student_name>", "student")
+        safe_part = safe_part.replace("<repo_owner>", "owner")
         parts.append(safe_part)
 
     parts[-1] = f"artifact_{index:03d}_{parts[-1]}"
@@ -293,15 +307,115 @@ def identity_attempt_folders(project_path, identity):
             for attempt in identity["attempts"]]
 
 
+def load_notebook(data):
+    """
+    Parse a Jupyter notebook from bytes or text.
+
+    Bytes with a UTF-16 byte-order mark are decoded as UTF-16; other bytes as
+    UTF-8 with an optional byte-order mark (utf-8-sig). A leading BOM left in
+    text is dropped. Returns (notebook, None), or (None, reason) when the
+    notebook is not a JSON object with a list of cells.
+    """
+
+    if isinstance(data, bytes):
+        if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+            text = data.decode("utf-16", errors="replace")
+        else:
+            text = data.decode("utf-8-sig", errors="replace")
+    else:
+        text = data
+    text = text.removeprefix("﻿")
+    try:
+        notebook = json.loads(text)
+    except ValueError as error:
+        return None, f"not valid JSON ({error})"
+    if not isinstance(notebook, dict) or not isinstance(notebook.get("cells", []), list):
+        return None, "not a notebook (no list of cells)"
+    return notebook, None
+
+
+# Characters of redacted text kept per PDF; the rest is cut and reported.
+PDF_TEXT_CHARACTER_LIMIT = 50_000
+
+
+def extract_pdf_text(path):
+    """
+    Extract a PDF's text locally with pypdf, page by page.
+
+    Returns {"status", "pages", "text"}: status is "extracted", "no_text"
+    (for example a scanned PDF) or "unreadable" (damaged or encrypted).
+    Figures, images and layout are not extracted.
+    """
+
+    import logging
+
+    from pypdf import PdfReader
+
+    # pypdf logs warnings about damaged files; the status reports them.
+    logger = logging.getLogger("pypdf")
+    level = logger.level
+    logger.setLevel(logging.ERROR)
+    try:
+        reader = PdfReader(path)
+        pages = [(page.extract_text() or "").strip() for page in reader.pages]
+    except Exception:
+        # pypdf raises many types for damaged or encrypted files.
+        return {"status": "unreadable", "pages": None, "text": ""}
+    finally:
+        logger.setLevel(level)
+    text = "\n\n".join(
+        f"[Page {number}]\n{page}" for number, page in enumerate(pages, start=1) if page
+    )
+    return {
+        "status": "extracted" if text else "no_text",
+        "pages": len(pages),
+        "text": text,
+    }
+
+
+# GitHub links are looked for in these files' text, before redaction.
+LINK_SCAN_EXTENSIONS = {".pdf", ".ipynb"}
+
+
 def inventory_submission_files(
     entries,
     username,
     full_name,
     destination_folder=None,
+    linked_owners=(),
 ):
     """
     Inventory a student's merged submission files (see merge_attempt_files).
+
+    File names, text files and the text of PDFs are redacted: identity, plus
+    the owners of the student's GitHub links, from index.html (linked_owners)
+    and from the student's PDF and notebook text. Returns (files, links,
+    owners): links holds the GitHub repositories and profile owners found in
+    those documents, and owners every owner redacted; both stay in the
+    private student map.
     """
+
+    from ai_grader.repo_evidence import find_github_links
+
+    # Read text and PDFs once, before redaction, to find GitHub links.
+    raw_text = {}
+    pdf_text = {}
+    for entry in entries:
+        path = entry["path"]
+        if classify_file(path) == "text":
+            raw_text[path] = read_text_file(path)
+        elif path.suffix.lower() == ".pdf":
+            pdf_text[path] = extract_pdf_text(path)
+    scanned = [raw_text.get(path, "") for path in raw_text
+               if path.suffix.lower() in LINK_SCAN_EXTENSIONS]
+    scanned += [extraction["text"] for extraction in pdf_text.values()]
+    repositories, profiles = find_github_links("\n".join(scanned))
+    owners = sorted({owner for owner, _ in repositories} | set(profiles)
+                    | set(linked_owners), key=str.casefold)
+
+    def redact(text):
+        # Owners first, as for repository evidence.
+        return redact_identity(redact_owners(text, owners), username, full_name)
 
     files = []
 
@@ -312,6 +426,7 @@ def inventory_submission_files(
             index,
             username,
             full_name,
+            owners,
         )
         file_type = classify_file(path)
 
@@ -323,14 +438,28 @@ def inventory_submission_files(
         }
 
         if file_type == "text":
-            file_info["content"] = redact_identity(
-                read_text_file(path),
-                username,
-                full_name,
-            )
+            file_info["content"] = redact(raw_text[path])
             file_info["size_bytes"] = len(
                 file_info["content"].encode("utf-8")
             )
+
+        text_path = None
+        if path in pdf_text:
+            extraction = pdf_text[path]
+            text = redact(extraction["text"])
+            included = text[:PDF_TEXT_CHARACTER_LIMIT]
+            if extraction["status"] == "extracted":
+                text_path = relative_path.with_name(relative_path.name + ".txt")
+                file_info["extracted_text"] = included
+            file_info["text_extraction"] = {
+                "method": "pypdf_local_v1",
+                "status": extraction["status"],
+                "pages": extraction["pages"],
+                "characters": len(text),
+                "character_limit": PDF_TEXT_CHARACTER_LIMIT,
+                "truncated": len(included) < len(text),
+                "text_path": text_path.as_posix() if text_path else None,
+            }
 
         if destination_folder is not None:
             destination_path = destination_folder / relative_path
@@ -342,10 +471,19 @@ def inventory_submission_files(
                 )
             else:
                 shutil.copy2(path, destination_path)
+            if text_path is not None:
+                (destination_folder / text_path).write_text(
+                    file_info["extracted_text"],
+                    encoding="utf-8",
+                )
 
         files.append(file_info)
 
-    return files
+    links = {
+        "repositories": [[owner, repo] for owner, repo in repositories],
+        "profiles": list(profiles),
+    }
+    return files, links, owners
 
 
 def process_submissions(project_path, anonymized_root=None):
@@ -409,22 +547,40 @@ def process_submissions(project_path, anonymized_root=None):
     submissions = []
     student_map = {}
 
-    # Sorting by username makes Student_001 assignments deterministic.
-    for index, username in enumerate(
-        sorted(grouped),
-        start=1,
-    ):
-        student_id = f"Student_{index:03d}"
-
-        attempts = grouped[username]
-
-        # Sort attempts chronologically.
+    # Sort attempts chronologically.
+    for attempts in grouped.values():
         attempts.sort(
             key=lambda attempt: (
                 attempt["submitted_at"]
                 or datetime.min
             )
         )
+
+    # Sorting by username makes Student_001 assignments deterministic.
+    student_ids = {
+        username: f"Student_{index:03d}"
+        for index, username in enumerate(sorted(grouped), start=1)
+    }
+
+    # Owners of GitHub links in index.html, read locally, so they are
+    # redacted from the student's files like owners found in documents.
+    from ai_grader.repo_evidence import INDEX_FILENAME, map_repositories
+    index_links, _ = map_repositories(
+        submissions_path / INDEX_FILENAME,
+        {
+            student_ids[username]: {
+                "username": username,
+                "full_name": attempts[-1]["full_name"],
+            }
+            for username, attempts in grouped.items()
+        },
+    )
+    index_links = index_links or {}
+
+    for username in sorted(grouped):
+        student_id = student_ids[username]
+
+        attempts = grouped[username]
 
         # The newest attempt gives the submission time and the name.
         newest_attempt = attempts[-1]
@@ -438,11 +594,14 @@ def process_submissions(project_path, anonymized_root=None):
         )
         files_replaced = sum(1 for entry in entries if entry["replaced_attempts"])
 
-        files = inventory_submission_files(
+        record = index_links.get(student_id) or {}
+        files, document_links, redacted_owners = inventory_submission_files(
             entries,
             username,
             newest_attempt["full_name"],
             destination_folder,
+            [owner for owner, _ in record.get("repositories", [])]
+            + list(record.get("profiles", [])),
         )
 
         review_flags = []
@@ -511,6 +670,10 @@ def process_submissions(project_path, anonymized_root=None):
                 }
                 for entry, file_info in zip(entries, files)
             ],
+            # GitHub links found in PDF and notebook text (private).
+            "document_github_links": document_links,
+            # Owners redacted from the student's file names and text.
+            "redacted_repository_owners": redacted_owners,
         }
 
     return (
@@ -713,6 +876,7 @@ def write_submission_manifest(project_path):
                 submission["deliverable_checks"] = original_filename_checks(
                     merge_attempt_files(identity_attempt_folders(project_path, identity)),
                     identity["username"], identity["full_name"], spec,
+                    identity["redacted_repository_owners"],
                 )
 
         from ai_grader.repo_evidence import (

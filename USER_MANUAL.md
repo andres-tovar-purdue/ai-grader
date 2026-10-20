@@ -527,6 +527,18 @@ Known student usernames and names are redacted from text and filenames, includin
 
 AI Grader validates the anonymized manifest before grading.
 
+### PDF reports
+
+AI Grader extracts the text of each submitted PDF on this computer (with pypdf, no upload) so the grader can read the report: results tables, discussion, limitations, links. The text is redacted like other student text and saved next to the anonymized PDF as `artifact_###_<name>.pdf.txt`.
+
+- Figures, images, tables drawn as graphics, and page layout are **not** extracted, and the order of text may differ from the page. The grader is told this, and flags criteria that depend on a figure for review instead of penalizing them.
+- Up to 50,000 characters of text are kept per PDF. A longer PDF is cut there; the grader is told, and the student is flagged so you can review the rest.
+- A PDF with no extractable text (for example a scanned PDF) or a damaged PDF is presence-only, as before, and the student is flagged: "No text could be extracted from ...; verify the PDF manually."
+
+### Unreadable notebooks
+
+A notebook that is not valid JSON, for example a damaged file, no longer stops grading. Notebooks saved with a UTF-8 or UTF-16 byte-order mark are read correctly. If a notebook still cannot be read, the grader is told so, the student is flagged ("could not be read as a notebook; ... Review it manually."), and the rest of the batch continues.
+
 ### Students with several attempts
 
 Brightspace creates one folder per attempt. AI Grader builds each student's submission from **all** of their attempts: every file from every attempt is included, and when the same file (the same relative path, ignoring case) appears in more than one attempt, the copy from the newest attempt is used. A student whose last attempt re-uploaded only the PDF therefore keeps the notebook, script and data files from earlier attempts.
@@ -541,7 +553,9 @@ You can rerun `prepare-submissions` until grading starts, for example after addi
 
 ### GitHub repositories linked in submissions
 
-If students submit a link to a GitHub repository, for example in the Brightspace submission text, `prepare-submissions` also collects the repository as evidence. This happens only when Brightspace's `submissions\index.html` contains GitHub links; otherwise nothing changes.
+If students submit a link to a GitHub repository, for example in the Brightspace submission text, `prepare-submissions` also collects the repository as evidence. Links come from Brightspace's `submissions\index.html`. For a student with no repository link there, AI Grader also uses GitHub repository links found in that student's PDF or notebook text (read before redaction). Without any GitHub links, nothing changes.
+
+A link taken from a PDF or notebook is labeled as such in the facts file, and the student is flagged for review: a report may cite someone else's repository, such as a library it used. Its owner is redacted from all of that student's text as `<repo_owner>`, and the owner and URL are kept only in the private `grader\repository_map.json`.
 
 Links are recognized with or without `https://` or `www.` (for example `github.com/owner/repo`), with a `.git` ending or a path such as `/tree/main`, and in the SSH form `git@github.com:owner/repo.git`.
 
@@ -570,6 +584,7 @@ The facts file and the graded repository files are passed to grading as evidence
 | links only to sites other than GitHub | For example a GitLab or cloud-drive link. |
 | no link in the submission text | The submission has no link at all. |
 | no entry in index.html | The student has no submission text in `index.html`. |
+| no GitHub link in index.html or in the PDF or notebook text | `index.html` has no GitHub links, and the student's PDFs and notebooks have none either. |
 
 **Possible repositories for instructor review.** If a linked repository cannot be fetched, or a student linked only their GitHub profile, AI Grader looks up the owner's public repositories with an anonymous request to GitHub (no account or token) and lists those whose names match the project. A name matches when it is the linked repository's name, the project folder's name or the specification's project ID, ignoring underscores, hyphens and capitalization, or when it uses two or more parts of those names in order (for example `MSPE49600-PR02` for `mspe_49600_fa26_pr02`). These candidates are written only to the private `grader\repository_map.json`; the facts file records just how many there are. **Candidates are never fetched or graded.** Check them yourself and decide.
 
@@ -640,6 +655,18 @@ preliminary_grading_report.csv
 `preliminary_grading_report.csv` is the instructor-review worksheet.
 
 The preliminary report does **not** assign the final instructor score automatically.
+
+Every grading command creates a new run folder; earlier runs are never changed. With `--resume`, a saved model response is reused only if it was made with the same grading specification, model and inputs. After you approve a new specification, grading therefore requests new responses and writes a new run, and says so for each student whose saved responses no longer match.
+
+### Set a grading run aside
+
+An incomplete or invalid run can be set aside without deleting it:
+
+```powershell
+python -m ai_grader archive-grading .\projects\PROJECT_ID --run run_v001 --reason "incomplete run"
+```
+
+The run is moved to `grader\archive\grading_<date>_<time>\`, with an `archive_record.json` that lists what was moved and why. Without `--run`, all runs are moved. Once no run is left in `grader\grading_runs\`, the saved model responses in `grader\debug_responses\` are moved too, and `prepare-submissions` can run again. A run with finalized grades is never moved. New runs keep counting past archived ones, so a run number is never reused.
 
 ---
 
@@ -868,6 +895,12 @@ python -m ai_grader recover-grading PROJECT_PATH --response-pattern PATTERN
 Rebuild a grading run offline from saved model responses in `grader\debug_responses\`, with no new API calls. Responses that fail validation remain unscored.
 
 ```text
+python -m ai_grader archive-grading PROJECT_PATH [--run RUN_ID] [--reason TEXT]
+```
+
+Move grading runs (all of them by default) to `grader\archive\` without deleting them; once none is left, the saved responses go too, so `prepare-submissions` can run again. Runs with finalized grades are never moved.
+
+```text
 python -m ai_grader generate-report PROJECT_PATH --run RUN_ID --open
 ```
 
@@ -961,7 +994,13 @@ This is a safety feature.
 
 Before grading, rerunning `prepare-submissions` replaces the earlier preparation. Once grading has started, meaning `grader\grading_runs\` or `grader\debug_responses\` holds anything, it refuses and changes nothing: grading runs and saved model responses refer to the current `Student_###` numbers, and a new preparation could number students differently.
 
-To grade again with the current preparation, run `grade-submissions`. To prepare again anyway, first move `grader\grading_runs\` and `grader\debug_responses\` out of the project folder (archive them; do not delete approved or finalized grades), then rerun the command.
+To grade again with the current preparation, run `grade-submissions`. To prepare again anyway, set the runs and saved responses aside first, then rerun the command:
+
+```powershell
+python -m ai_grader archive-grading .\projects\PROJECT_ID
+```
+
+They are moved to `grader\archive\`, not deleted. Runs with finalized grades are never moved (see section 20).
 
 Do not delete the original Brightspace submissions unless they have been backed up elsewhere.
 
@@ -971,7 +1010,7 @@ Do not delete the original Brightspace submissions unless they have been backed 
 
 AI Grader's PDF processing relies on extractable embedded text.
 
-A scanned image-only PDF may require OCR before AI Grader can use it as project instructions.
+A scanned image-only PDF may require OCR before AI Grader can use it as project instructions. A student's PDF without extractable text is checked for presence only, and the student is flagged for manual review (section 18).
 
 ---
 

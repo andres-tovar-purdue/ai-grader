@@ -15,12 +15,16 @@ from ai_grader.grading_validation import (
 )
 from ai_grader.spec_validation import latest_spec_path, validate_grading_spec
 from ai_grader.submission_checks import spec_fingerprint, deliverable_presence_checks
+from ai_grader.submission_processing import load_notebook
 from ai_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
 
 
 SUBMISSION_MANIFEST_FILENAME = "submission_manifest.json"
 ANONYMIZED_FOLDER = "anonymized_submissions"
 GRADING_RUNS_FOLDER = "grading_runs"
+DEBUG_RESPONSES_FOLDER = "debug_responses"
+# archive-grading moves runs to ARCHIVE_FOLDER/<name>/grading_runs/.
+ARCHIVE_FOLDER = "archive"
 TEXT_EXTENSIONS = {".m", ".py", ".bas", ".txt", ".md", ".csv", ".json", ".ipynb"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 FORBIDDEN_MANIFEST_KEYS = {
@@ -170,6 +174,17 @@ def load_grading_inputs(project_path):
             if file_info["path"] in seen_paths:
                 raise RuntimeError("Duplicate anonymized artifact path in manifest.")
             seen_paths.add(file_info["path"])
+            text_path = (file_info.get("text_extraction") or {}).get("text_path")
+            if text_path is not None:
+                if text_path != file_info["path"] + ".txt":
+                    raise RuntimeError(
+                        f"Unexpected extracted text path: {text_path}"
+                    )
+                if not (student_root / text_path).is_file():
+                    raise FileNotFoundError(
+                        f"Extracted PDF text does not exist: {text_path}"
+                    )
+                seen_paths.add(text_path)
 
         actual_paths = {p.relative_to(student_root).as_posix()
                         for p in student_root.rglob("*") if p.is_file()}
@@ -227,8 +242,16 @@ def build_student_input(spec, submission, student_root, instructions):
                 raise RuntimeError(
                     f"Anonymized text differs from manifest: {relative_path}"
                 )
+            notebook = None
             if extension == ".ipynb":
-                notebook = json.loads(text)
+                notebook, notebook_error = load_notebook(path.read_bytes())
+                if notebook is None:
+                    text = (
+                        f"NOTEBOOK COULD NOT BE READ: {notebook_error}. Its cells "
+                        "and saved outputs were not given to the grader. Do not "
+                        "treat this as missing work; require instructor review."
+                    )
+            if notebook is not None:
                 sections = [
                     "NOTEBOOK EVIDENCE: saved source and outputs; "
                     "the notebook was not executed by the grader."
@@ -331,6 +354,40 @@ def build_student_input(spec, submission, student_root, instructions):
                 "detail": "auto",
             })
             image_limitations.append(relative_path)
+        elif extension == ".pdf" and file_info.get("text_extraction"):
+            extraction = file_info["text_extraction"]
+            if extraction["status"] == "extracted":
+                text = (student_root / extraction["text_path"]).read_text(encoding="utf-8")
+                if text != file_info.get("extracted_text"):
+                    raise RuntimeError(
+                        f"Extracted PDF text differs from manifest: {relative_path}"
+                    )
+                notes = [
+                    "PDF TEXT: extracted locally with pypdf and redacted like other "
+                    "text. Figures, images, tables drawn as graphics, and page "
+                    "layout were not extracted, and text order may differ from "
+                    "the page. If a criterion depends on a figure or image in the "
+                    "PDF, require instructor review instead of penalizing."
+                ]
+                if extraction["truncated"]:
+                    notes.append(
+                        f"PDF TEXT TRUNCATED: only the first "
+                        f"{extraction['character_limit']:,} of "
+                        f"{extraction['characters']:,} characters are included. "
+                        "Do not treat content beyond that point as missing."
+                    )
+                text_sections.append(
+                    f"ARTIFACT: {relative_path}\n"
+                    "EVIDENCE TYPE: pdf_extracted_text\n"
+                    + "\n".join(notes) + "\n" + text
+                )
+            else:
+                text_sections.append(
+                    f"ARTIFACT: {relative_path}\nEVIDENCE TYPE: file_presence\n"
+                    "No text could be extracted from this PDF (status: "
+                    f"{extraction['status']}); it may be scanned or damaged. Presence "
+                    "only was verified; its contents require instructor review."
+                )
         elif extension == ".slx":
             preflight = slx_preflight[relative_path]
             text_sections.append(
@@ -362,8 +419,9 @@ def build_student_input(spec, submission, student_root, instructions):
         "Never infer filename errors from them or from redacted save commands. "
         "Use only the original filename compliance checks. no_exact_match means "
         "the exact required original filename was not found; it does not prove "
-        "the artifact content is missing. PDFs receive presence-only verification; "
-        "if their contents are needed, flag instructor review without penalizing a tool limitation.",
+        "the artifact content is missing. PDF text was extracted locally where possible; "
+        "figures, images and layout were not. If needed evidence is in a PDF figure or a "
+        "PDF without extractable text, flag instructor review without penalizing a tool limitation.",
         "TEXT AND PRESENCE EVIDENCE:\n" + "\n\n---\n\n".join(text_sections),
         (
             "IMAGE PRIVACY LIMITATION:\nImage filenames and filesystem paths are "
@@ -381,10 +439,17 @@ def build_student_input(spec, submission, student_root, instructions):
 
 
 def next_grading_run_path(grader_path):
+    """
+    The next run_v### folder. Archived runs count too, so a new run never
+    reuses an archived run's number (finalizations are filed by number).
+    """
     runs_path = grader_path / GRADING_RUNS_FOLDER
     existing_versions = []
-    if runs_path.is_dir():
-        for path in runs_path.iterdir():
+    folders = [runs_path, *(grader_path / ARCHIVE_FOLDER).glob(f"*/{GRADING_RUNS_FOLDER}")]
+    for folder in folders:
+        if not folder.is_dir():
+            continue
+        for path in folder.iterdir():
             match = re.fullmatch(r"run_v(\d{3})", path.name)
             if path.is_dir() and match:
                 existing_versions.append(int(match.group(1)))
@@ -475,13 +540,14 @@ def grade_submissions(
             student_root,
             instructions,
         )
-        debug_path = project_path / "grader" / "debug_responses"
+        debug_path = project_path / "grader" / DEBUG_RESPONSES_FOLDER
         debug_path.mkdir(parents=True, exist_ok=True)
         input_sha256 = spec_fingerprint({'input': api_input, 'response_schema': response_schema,
                                          'instructions': api_instructions})
         saved = None
         if resume:
-            for candidate in sorted(debug_path.glob(f"{submission['student_id']}_*.json"), reverse=True):
+            candidates = sorted(debug_path.glob(f"{submission['student_id']}_*.json"), reverse=True)
+            for candidate in candidates:
                 try:
                     possible = json.loads(candidate.read_text(encoding='utf-8'))
                 except (OSError, ValueError):
@@ -499,6 +565,11 @@ def grade_submissions(
                     reused_responses += 1
                     print(f"Reused saved response: {candidate.name}", flush=True)
                     break
+            if saved is None and candidates and not retry_failed:
+                # For example, responses made before a new spec was approved.
+                print(f"No saved response for {submission['student_id']} matches the "
+                      "current grading spec, model and inputs; requesting a new one.",
+                      flush=True)
         if saved is None:
             client = client or get_client()
             saved = {
