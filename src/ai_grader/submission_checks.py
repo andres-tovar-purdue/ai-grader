@@ -9,8 +9,8 @@ from ai_grader.repo_evidence import (
 )
 from ai_grader.spec_validation import latest_spec_path, validate_grading_spec
 from ai_grader.submission_processing import (
-    anonymize_relative_path, identity_attempt_folders, merge_attempt_files,
-    process_submissions, validate_anonymized_manifest,
+    anonymize_relative_path, identity_attempt_folders, process_submissions,
+    student_entries, validate_anonymized_manifest,
 )
 
 
@@ -108,26 +108,28 @@ def refresh_submission_checks(project_path):
         if original_files != new["files"]:
             raise RuntimeError("Original submission artifacts changed; checks were not refreshed.")
         identity = private_map[old["student_id"]]
-        entries = merge_attempt_files(identity_attempt_folders(root, identity))
-        originals = [entry["path"] for entry in entries]
-        for original, file_info in zip(originals, original_files):
-            copied = grader / "anonymized_submissions" / old["student_id"] / file_info["path"]
-            if file_info["file_type"] == "text":
-                # Preparation writes text using platform-native newlines. Compare
-                # text using universal-newline decoding, exactly as grading does.
-                # This permits LF/CRLF differences, not changed characters/content.
-                matches = copied.read_text(encoding="utf-8") == file_info["content"]
-            else:
-                matches = copied.read_bytes() == original.read_bytes()
-            if not matches:
-                raise RuntimeError(
-                    "Anonymized artifact integrity check failed for "
-                    f"{old['student_id']}/{file_info['path']}. "
-                    "Artifact content differs from the prepared submission."
-                )
-        old["deliverable_checks"] = original_filename_checks(
-            entries, identity["username"], identity["full_name"], spec,
-            identity["redacted_repository_owners"])
+        with student_entries(identity_attempt_folders(root, identity)) as entries:
+            originals = [entry["path"] for entry in entries]
+            for original, file_info in zip(originals, original_files):
+                copied = (grader / "anonymized_submissions" / old["student_id"]
+                          / file_info["path"])
+                if file_info["file_type"] == "text":
+                    # Preparation writes text using platform-native newlines.
+                    # Compare text using universal-newline decoding, exactly as
+                    # grading does. This permits LF/CRLF differences, not
+                    # changed characters/content.
+                    matches = copied.read_text(encoding="utf-8") == file_info["content"]
+                else:
+                    matches = copied.read_bytes() == original.read_bytes()
+                if not matches:
+                    raise RuntimeError(
+                        "Anonymized artifact integrity check failed for "
+                        f"{old['student_id']}/{file_info['path']}. "
+                        "Artifact content differs from the prepared submission."
+                    )
+            old["deliverable_checks"] = original_filename_checks(
+                entries, identity["username"], identity["full_name"], spec,
+                identity["redacted_repository_owners"])
     validate_anonymized_manifest(manifest, private_map)
     repository_map_path = grader / REPOSITORY_MAP_FILENAME
     if repository_map_path.is_file():

@@ -217,6 +217,30 @@ def load_grading_inputs(project_path):
     return spec_path, spec, manifest_path, manifest, anonymized_root
 
 
+def archive_section(relative_path, file_info):
+    """Grader text for a submitted ZIP archive, whose files are separate artifacts."""
+    archive = file_info["archive_extraction"]
+    lines = [
+        f"ARTIFACT: {relative_path}",
+        "EVIDENCE TYPE: zip_archive",
+        "ZIP ARCHIVE: extracted locally by AI Grader. Its files are graded as "
+        "separate artifacts (see extracted_from in the inventory), under "
+        f"{archive['contents_folder']}. Files added: {archive['files_added']}.",
+    ]
+    if archive["identical_to_artifacts"]:
+        lines.append(
+            "Files in the archive identical to separately submitted artifacts "
+            "(not repeated): " + ", ".join(archive["identical_to_artifacts"]) + ".")
+    if archive["status"] != "extracted" or archive["nested_archives_not_extracted"]:
+        lines.append(
+            f"EXTRACTION STATUS: {archive['status']}; skipped members: "
+            f"{json.dumps(archive['skipped_members'], sort_keys=True)}; ZIP files "
+            f"inside not extracted: {archive['nested_archives_not_extracted']}. "
+            "Content that was not extracted was not inspected. Do not treat it "
+            "as missing or wrong; require instructor review if relevant.")
+    return "\n".join(lines)
+
+
 def build_student_input(spec, submission, student_root, instructions):
     """Build one multimodal request without parsing or executing SLX models."""
     content = []
@@ -229,12 +253,15 @@ def build_student_input(spec, submission, student_root, instructions):
         relative_path = file_info["path"]
         path = student_root / relative_path
         extension = path.suffix.lower()
-        artifact_inventory.append({
+        inventory_entry = {
             "path": relative_path,
             "file_type": file_info["file_type"],
             "extension": extension,
             "size_bytes": file_info["size_bytes"],
-        })
+        }
+        if "extracted_from" in file_info:
+            inventory_entry["extracted_from"] = file_info["extracted_from"]
+        artifact_inventory.append(inventory_entry)
 
         if extension in TEXT_EXTENSIONS:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -388,6 +415,8 @@ def build_student_input(spec, submission, student_root, instructions):
                     f"{extraction['status']}); it may be scanned or damaged. Presence "
                     "only was verified; its contents require instructor review."
                 )
+        elif "archive_extraction" in file_info:
+            text_sections.append(archive_section(relative_path, file_info))
         elif extension == ".slx":
             preflight = slx_preflight[relative_path]
             text_sections.append(

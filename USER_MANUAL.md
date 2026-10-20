@@ -535,6 +535,17 @@ AI Grader extracts the text of each submitted PDF on this computer (with pypdf, 
 - Up to 50,000 characters of text are kept per PDF. A longer PDF is cut there; the grader is told, and the student is flagged so you can review the rest.
 - A PDF with no extractable text (for example a scanned PDF) or a damaged PDF is presence-only, as before, and the student is flagged: "No text could be extracted from ...; verify the PDF manually."
 
+### ZIP archives
+
+You do not need to unzip students' ZIP files. `prepare-submissions` extracts every `.zip` in a submission, and in a linked GitHub repository, on this computer. The originals in `submissions\` are never changed; the extracted files go only to the anonymized submissions.
+
+- Each file in the archive becomes its own artifact under `<archive name>.zip_contents\`, for example `student_files.zip_contents\artifact_007_student_beam_ai.py`, and is redacted, read and graded like any other submitted file (PDF text, notebooks, GitHub links). The ZIP file itself is kept too.
+- A file identical to one the student also submitted outside the archive is not added twice; the archive's record lists the matching artifact instead.
+- For safety, AI Grader skips paths that would leave the archive folder, links, encrypted or damaged entries, entries over 20 MB, anything past 100 MB or 500 entries per archive, and system clutter such as `__MACOSX\` and `.DS_Store`. A ZIP inside a ZIP is kept as a file but not extracted.
+- If an archive cannot be read, or anything other than clutter was skipped, or it contains another ZIP, the student is flagged for review. The grader is told that content it did not see was not inspected, so it is not penalized.
+- `prepare-submissions` lists each archive by anonymous ID, for example `Student_008: ZIP in submission: extracted, 3 file(s) added, 4 identical to other files (not repeated)`.
+- `student_map.json` (private) records which archive each extracted file came from.
+
 ### Unreadable notebooks
 
 A notebook that is not valid JSON, for example a damaged file, no longer stops grading. Notebooks saved with a UTF-8 or UTF-16 byte-order mark are read correctly. If a notebook still cannot be read, the grader is told so, the student is flagged ("could not be read as a notebook; ... Review it manually."), and the rest of the batch continues.

@@ -38,9 +38,14 @@ from datetime import datetime, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 
+from ai_grader.archives import (
+    contents_folder, extract_archive, is_archive, problem_counts,
+)
 from ai_grader.submission_processing import (
+    anonymize_folder,
     anonymize_relative_path,
     classify_file,
+    content_key,
     decode_text,
     identity_variants,
     read_text_file,
@@ -608,13 +613,42 @@ def tree_facts(clone_path, identity, owner):
     }
 
 
+def copy_repository_file(source, relative, identity, owner, destination_root):
+    """Copy one repository file to destination_root/relative, redacting text."""
+    destination = destination_root / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    file_type = classify_file(source)
+    record = {
+        "path": relative.as_posix(),
+        "file_type": file_type,
+        "extension": source.suffix.lower(),
+        "size_bytes": source.stat().st_size,
+        "source": REPOSITORY_SOURCE,
+    }
+    if file_type == "text":
+        record["content"] = redact(read_text_file(source), identity, owner)
+        record["size_bytes"] = len(record["content"].encode("utf-8"))
+        destination.write_text(record["content"], encoding="utf-8")
+    else:
+        shutil.copyfile(source, destination)
+    return record
+
+
 def copy_tracked_files(clone_path, tracked, env_folders, identity, owner,
                        destination_root, folder_name, next_index):
-    """Copy tracked files with redaction; return (file records, skipped, next index)."""
+    """
+    Copy tracked files with redaction; return (file records, skipped, next index).
+
+    ZIP archives are copied and also extracted: their files follow all
+    tracked files, under "<archive>_contents/", with "extracted_from". Files
+    identical to a tracked file are not added again.
+    """
     files = []
     skipped = {"environment_folder_files": 0, "too_large": 0,
                "over_total_limit": 0, "not_regular_files": 0}
     total = 0
+    tracked_hashes = {}
+    archives = []
 
     for path in tracked:
         if inside(path, env_folders):
@@ -638,23 +672,58 @@ def copy_tracked_files(clone_path, tracked, env_folders, identity, owner,
             identity["username"], identity["full_name"],
         )
         next_index += 1
-        destination = destination_root / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        file_type = classify_file(source)
-        record = {
-            "path": relative.as_posix(),
-            "file_type": file_type,
-            "extension": source.suffix.lower(),
-            "size_bytes": size,
-            "source": REPOSITORY_SOURCE,
-        }
-        if file_type == "text":
-            record["content"] = redact(read_text_file(source), identity, owner)
-            record["size_bytes"] = len(record["content"].encode("utf-8"))
-            destination.write_text(record["content"], encoding="utf-8")
-        else:
-            shutil.copyfile(source, destination)
+        record = copy_repository_file(source, relative, identity, owner, destination_root)
         files.append(record)
+        if is_archive(source):
+            archives.append((source, path, record))
+        else:
+            tracked_hashes.setdefault(content_key(source), record["path"])
+
+    for source, path, record in archives:
+        with tempfile.TemporaryDirectory(prefix="ai_grader_archive_",
+                                         ignore_cleanup_errors=True) as work:
+            report = extract_archive(source, work)
+            member_skips = dict(report["skipped"])
+            folder = contents_folder(Path(folder_name) / redact_path(path, identity, owner))
+            identical, added = [], 0
+            for member in report["files"]:
+                member_source = Path(work) / member
+                same = tracked_hashes.get(content_key(member_source))
+                if same is not None:
+                    identical.append(same)
+                    continue
+                size = member_source.stat().st_size
+                if size > MAX_REPO_FILE_BYTES:
+                    member_skips["too_large"] += 1
+                    continue
+                if total + size > MAX_REPO_COPY_BYTES:
+                    member_skips["over_total_limit"] += 1
+                    continue
+                total += size
+                relative = anonymize_relative_path(
+                    folder / redact_path(member, identity, owner), next_index,
+                    identity["username"], identity["full_name"],
+                )
+                next_index += 1
+                member_record = copy_repository_file(
+                    member_source, relative, identity, owner, destination_root)
+                member_record["extracted_from"] = record["path"]
+                files.append(member_record)
+                added += 1
+        problems = problem_counts(member_skips)
+        status = report["status"]
+        if status == "extracted" and problems:
+            status = "partly_extracted"
+        record["archive_extraction"] = {
+            "method": "zip_local_v1",
+            "status": status,
+            "contents_folder": anonymize_folder(
+                folder, identity["username"], identity["full_name"]).as_posix(),
+            "files_added": added,
+            "identical_to_artifacts": identical,
+            "skipped_members": problems,
+            "nested_archives_not_extracted": report["nested_archives"],
+        }
 
     return files, skipped, next_index
 
