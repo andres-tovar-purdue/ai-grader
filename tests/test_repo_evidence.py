@@ -622,6 +622,16 @@ class PrepareSubmissionsTests(unittest.TestCase):
         self.assertEqual(repo_evidence.redact("data dataset data_set", identity, "data"),
                          "<repo_owner> dataset <repo_owner>_set")
 
+    def test_repository_paths_and_text_redact_name_handles(self):
+        # A repository file named with a handle built from the student's
+        # name (surname + initial) that is neither the username nor the owner.
+        identity = {"username": "zz_user", "full_name": "Zed Zulu"}
+        self.assertEqual(
+            repo_evidence.redact_path("src/zuluz_beam_ai.py", identity, "zz-gh"),
+            Path("src/student_beam_ai.py"))
+        self.assertEqual(repo_evidence.redact("# by zuluz (zz-gh)", identity, "zz-gh"),
+                         "# by <student_name> (<repo_owner>)")
+
 
 class Utf16Tests(unittest.TestCase):
     UTF16_TEXT = "Result by Avery Smoke: 42\r\nmean speed\r\n"

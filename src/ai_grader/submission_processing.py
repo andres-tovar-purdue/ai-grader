@@ -198,20 +198,50 @@ def name_parts(full_name):
     return sorted(parts, key=lambda part: (-len(part), part))
 
 
+# A name part must have at least this many letters to be combined into a
+# handle, so short surnames such as "Way" don't turn "away" into a name.
+HANDLE_PART_MIN_LETTERS = 4
+
+
+def name_handles(full_name):
+    """
+    Handles students often build from their names, such as "jsmith",
+    "smithj", "johnsmith" or "smithjohn": every pair of different name parts,
+    joined directly or as an initial plus the other part. The full part must
+    have at least HANDLE_PART_MIN_LETTERS letters.
+    """
+
+    parts = name_parts(full_name)
+    handles = set()
+    for first in parts:
+        for second in parts:
+            if first.casefold() == second.casefold():
+                continue
+            handles.add(first + second)
+            if sum(character.isalpha() for character in second) >= HANDLE_PART_MIN_LETTERS:
+                handles.add(first[0] + second)
+                handles.add(second + first[0])
+    return sorted(handles, key=lambda handle: (-len(handle), handle))
+
+
 def redact_name_parts(text, full_name):
     """
-    Replace each name part as a whole token, ignoring case: a letter on
-    either side means no match, so "Chen" leaves "kitchen" alone, while
-    "chen_prj1.ipynb" and "Chen," are redacted. Placeholders already in the
-    text are kept as they are.
+    Replace each name part, and each handle built from them (name_handles),
+    as a whole token, ignoring case: a letter on either side means no match,
+    so "Chen" leaves "kitchen" alone, while "chen_prj1.ipynb", "Chen," and
+    "chenj_beam.py" are redacted. Placeholders already in the text are kept
+    as they are.
     """
 
     parts = name_parts(full_name)
     if not parts:
         return text
+    # Longest first, so a handle wins over a part it starts with.
+    tokens = sorted(set(parts) | set(name_handles(full_name)),
+                    key=lambda token: (-len(token), token))
     pattern = re.compile(
         "(" + "|".join(re.escape(item) for item in PLACEHOLDERS) + ")"
-        + f"|(?<!{LETTER})(?:" + "|".join(re.escape(part) for part in parts)
+        + f"|(?<!{LETTER})(?:" + "|".join(re.escape(token) for token in tokens)
         + f")(?!{LETTER})",
         re.IGNORECASE,
     )

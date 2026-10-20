@@ -12,7 +12,7 @@ from ai_grader.cli import main
 from ai_grader.repo_evidence import submission_cutoff
 from ai_grader.submission_checks import refresh_submission_checks
 from ai_grader.submission_processing import (
-    name_parts, redact_identity, write_submission_manifest,
+    name_handles, name_parts, redact_identity, write_submission_manifest,
 )
 import test_grading as grading_fixtures
 
@@ -174,6 +174,30 @@ class NameRedactionTests(unittest.TestCase):
                          "<student_name>_<student_name>.py by <student_name> L. "
                          "<student_name>; L. stays")
         self.assertEqual(name_parts("Ann B Chen"), ["Chen", "Ann"])
+
+    def test_handles_built_from_name_parts_are_redacted(self):
+        # Surname plus initial, initial plus surname, and joined parts,
+        # in file names and text, for a handle that is not the username.
+        self.assertEqual(
+            self.redact("smithj_beam_ai.py jsmith.ipynb Author: JohnSmith2 smith_j", "John Smith"),
+            "<student_name>_beam_ai.py <student_name>.ipynb Author: <student_name>2 "
+            "<student_name>_j")
+        self.assertEqual(self.redact("smithjohn, Smith-John", "John Smith"),
+                         "<student_name>, <student_name>-<student_name>")
+
+    def test_handles_leave_other_words_alone(self):
+        # Letters on either side still block a match.
+        self.assertEqual(self.redact("blacksmiths ajsmithx jsmiths", "John Smith"),
+                         "blacksmiths ajsmithx jsmiths")
+        # A short part is not combined with an initial: "away" is not "Al Way".
+        self.assertEqual(self.redact("go away, wayA", "Al Way"), "go away, wayA")
+        self.assertNotIn("away", name_handles("Al Way"))
+
+    def test_name_handles(self):
+        self.assertEqual(sorted(name_handles("John Smith")),
+                         sorted(["JohnSmith", "SmithJohn", "JSmith", "SmithJ", "SJohn", "JohnS"]))
+        self.assertIn("ChenJ", name_handles("Mary-Jane L. Chen"))
+        self.assertEqual(name_handles("Cher"), [])
 
     def test_prepared_files_have_no_name_parts(self):
         with tempfile.TemporaryDirectory() as directory:
