@@ -10,7 +10,7 @@ cd ai-grader
 python install.py
 ```
 
-`install.py` creates the virtual environment, installs AI Grader, creates the `projects\` folder next to the repository, asks for your OpenAI API key and model to create `.env`, and tests the API connection. It is safe to rerun and never overwrites an existing `.env`. When it finishes, it prints the command to activate the environment and the next step. Part I explains each step.
+`install.py` creates the virtual environment, installs AI Grader, creates the `projects\` folder next to the repository, asks for your OpenAI API key and model to create `.env`, and runs `check-setup` (including one test API request). It is safe to rerun and never overwrites an existing `.env`. If a check fails, fix it (for example, the key in `ai-grader\.env`) and run `python install.py` again. When everything passes, it prints the command to activate the environment and the next step. Part I explains each step.
 
 ---
 
@@ -144,8 +144,8 @@ Use any Python 3.10 or newer; no virtual environment is needed yet. The script:
    - `OPENAI_API_KEY` (not shown while you type or paste it);
    - `OPENAI_MODEL`, for example `gpt-5.4-mini` (required);
    - `GRADER_INSTRUCTOR_NAME`, the person who reviews and approves grading specifications (optional now; `approve-spec` needs it);
-6. makes one small test request to the OpenAI API;
-7. prints the command to activate the environment and the next step. If the API test fails, it instead says to fix the key in `.env` and run `python -m ai_grader check-setup`; there is no need to rerun `install.py`.
+6. runs `python -m ai_grader check-setup` from the workspace with the new environment (Section 8), which includes one small test request to the OpenAI API;
+7. if every check passes, prints the command to activate the environment and the next step. If a check fails, it says where `.env` is; fix the problem (for example, paste the key into `.env` yourself) and run `python install.py` again. The rerun keeps everything already set up and repeats the check.
 
 It is safe to rerun at any time. It keeps an existing virtual environment and never overwrites or reads an existing `.env`.
 
@@ -176,13 +176,13 @@ The prompt should now begin with `(.venv)`:
 (.venv) PS C:\Users\<username>\code\ai_grader>
 ```
 
-Activate it this way at the start of every work session.
+Activate it this way at the start of every work session. `install.py` cannot do this for you: a script cannot change the environment of the terminal that started it.
 
 ---
 
 ## 8. Check the Setup
 
-With the environment active, from the workspace:
+`install.py` already ran this check. Run it again at any time (for example after editing `.env`) with the environment active, from the workspace:
 
 ```powershell
 python -m ai_grader check-setup

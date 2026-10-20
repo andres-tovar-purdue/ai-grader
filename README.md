@@ -14,8 +14,10 @@ python install.py
 
 `install.py` creates `.venv\` and `.env` inside the repository (Git ignores both),
 installs AI Grader with `pip install -e .`, creates `projects\` next to the
-repository after asking, prompts for `OPENAI_API_KEY` and `OPENAI_MODEL`, and tests
-the API connection. It is safe to rerun and never overwrites an existing `.env`.
+repository after asking, prompts for `OPENAI_API_KEY` and `OPENAI_MODEL`, and runs
+`check-setup` (including one test API request). It is safe to rerun and never
+overwrites an existing `.env`; if a check fails, fix it (for example, the key in
+`.env`) and run `python install.py` again.
 
 ```text
 <workspace>\
@@ -23,7 +25,8 @@ the API connection. It is safe to rerun and never overwrites an existing `.env`.
 └── projects\         grading projects and student data, outside the repository
 ```
 
-Run AI Grader from the workspace folder:
+Run AI Grader from the workspace folder, activating the environment at the start of
+each session:
 
 ```powershell
 .\ai-grader\.venv\Scripts\Activate.ps1

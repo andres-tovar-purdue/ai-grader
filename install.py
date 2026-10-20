@@ -12,8 +12,9 @@ It creates (each only if missing, so it is safe to rerun):
     │   └── .env         API key and model, from .env.example
     └── projects\\       local grading projects, outside the repository
 
-then makes one test API request. An existing .env is never overwritten.
-Standard library only.
+then runs `python -m ai_grader check-setup` from the parent folder with the
+venv's Python, which includes one test API request. An existing .env is
+never overwritten. Standard library only.
 """
 
 import getpass
@@ -29,17 +30,6 @@ VENV_PATH = REPOSITORY_ROOT / ".venv"
 ENV_PATH = REPOSITORY_ROOT / ".env"
 ENV_EXAMPLE_PATH = REPOSITORY_ROOT / ".env.example"
 PROJECTS_PATH = REPOSITORY_ROOT.parent / "projects"
-
-CONNECTION_TEST = (
-    "from ai_grader.ai_client import describe_model, test_connection\n"
-    "print(describe_model())\n"
-    "try:\n"
-    "    print(test_connection())\n"
-    "except Exception as error:\n"
-    "    print(f'{type(error).__name__}: {error}')\n"
-    "    raise SystemExit(1)\n"
-)
-
 
 class SetupError(Exception):
     pass
@@ -161,22 +151,17 @@ def ensure_env_file(env_path, example_path, ask=None, ask_secret=None):
     return True
 
 
-def test_api_connection(python, repository_root, run=None):
+def run_check_setup(python, workspace, run=None):
     """
-    Return (ok, lines) from one test request made with the venv's Python:
-    the model used and the reply, or the error.
+    Run check-setup with the venv's Python from the workspace (the folder
+    that holds the repository and projects\\), exactly as a user would after
+    activating the environment. Its report goes straight to the terminal.
+    Returns True if every check passed.
     """
 
     run = run or subprocess.run
-    result = run(
-        [str(python), "-c", CONNECTION_TEST],
-        cwd=str(repository_root), capture_output=True, text=True,
-    )
-    lines = (result.stdout or "").strip().splitlines()
-    if result.returncode != 0 and not lines:
-        # Failed before printing, e.g. AI Grader is not installed.
-        lines = (result.stderr or "").strip().splitlines()[-1:] or ["unknown error"]
-    return result.returncode == 0, lines
+    result = run([str(python), "-m", "ai_grader", "check-setup"], cwd=str(workspace))
+    return result.returncode == 0
 
 
 def print_activation(repository_root):
@@ -188,25 +173,26 @@ def print_next_steps(repository_root):
     parent = repository_root.parent
     print()
     print(f"Work from {parent} (the folder that holds {repository_root.name}\\ "
-          "and projects\\). Activate the environment there with:")
+          "and projects\\).")
+    print("At the start of every session, activate the environment there "
+          "(a setup script cannot do this for your terminal):")
     print()
     print_activation(repository_root)
     print()
     print("Next step:")
     print()
-    print("  python -m ai_grader check-setup")
     print("  python -m ai_grader init-project PROJECT_ID")
 
 
-def print_fix_steps(repository_root, env_path):
-    """After a failed API test: everything else is set up, so no rerun is needed."""
+def print_fix_steps(env_path):
+    """After a failed check: fix what it reported, then rerun this script."""
 
+    print(f"OPENAI_API_KEY and OPENAI_MODEL are in {env_path} "
+          "(edit it with a text editor).")
+    print("After fixing, run this script again; it keeps everything already "
+          "set up and repeats the check:")
     print()
-    print(f"Fix OPENAI_API_KEY (or OPENAI_MODEL) in {env_path} with a text editor.")
-    print("Then check again; there is no need to rerun install.py:")
-    print()
-    print_activation(repository_root)
-    print("  python -m ai_grader check-setup")
+    print("  python install.py")
 
 
 def main():
@@ -239,16 +225,12 @@ def main():
         print(f"Setup stopped: {error}")
         return 1
 
-    print("Testing the API connection ...")
-    ok, lines = test_api_connection(python, REPOSITORY_ROOT)
-    for line in lines:
-        print(f"  {line}")
-    if not ok:
-        print("API connection failed.")
-        print_fix_steps(REPOSITORY_ROOT, ENV_PATH)
+    print()
+    print("Checking the setup (python -m ai_grader check-setup) ...")
+    if not run_check_setup(python, REPOSITORY_ROOT.parent):
+        print_fix_steps(ENV_PATH)
         return 1
 
-    print("API connection: OK")
     print_next_steps(REPOSITORY_ROOT)
     return 0
 
