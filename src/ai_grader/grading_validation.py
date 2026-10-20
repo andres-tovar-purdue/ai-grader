@@ -6,6 +6,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from ai_grader.spec_validation import validate_scoring_totals
+from ai_grader.submission_processing import load_notebook
 
 from ai_grader.rounding import (
     DEFAULT_ROUNDING_POLICY,
@@ -31,6 +32,33 @@ def validate_model_grading_response(response, schema_path):
             location = ".".join(str(item) for item in error.absolute_path)
             messages.append(f"{location or '<root>'}: {error.message}")
         raise ValueError("Invalid grading response:\n" + "\n".join(messages))
+
+
+def artifact_review_reasons(submission):
+    """Review reasons for artifacts the grader could not fully read."""
+    reasons = []
+    for file in submission["files"]:
+        extension = file.get("extension", "").lower()
+        if extension == ".pdf":
+            extraction = file.get("text_extraction")
+            if extraction is None:  # Prepared before PDF text extraction.
+                reasons.append(
+                    f"PDF contents of {file['path']} were not inspected; "
+                    "verify the PDF manually.")
+            elif extraction["status"] != "extracted":
+                reasons.append(
+                    f"No text could be extracted from {file['path']}; "
+                    "verify the PDF manually.")
+            elif extraction.get("truncated"):
+                reasons.append(
+                    f"Only part of the text of {file['path']} was given to the "
+                    "grader; review the rest of the PDF manually.")
+        elif extension == ".ipynb" and "content" in file:
+            if load_notebook(file["content"])[0] is None:
+                reasons.append(
+                    f"{file['path']} could not be read as a notebook; its cells "
+                    "and outputs were not graded. Review it manually.")
+    return reasons
 
 
 def calculate_grading_result(
@@ -65,8 +93,7 @@ def calculate_grading_result(
     raw_task_subtotals = []
     all_review_reasons = list(submission.get("review_flags", []))
     all_review_reasons.extend(response["review_reasons"])
-    if any(file.get("extension", "").lower() == ".pdf" for file in submission["files"]):
-        all_review_reasons.append("PDF contents were not inspected; verify the required PDF export manually.")
+    all_review_reasons.extend(artifact_review_reasons(submission))
     any_review = bool(all_review_reasons) or response["review_required"]
     deduction_causes = {}
 

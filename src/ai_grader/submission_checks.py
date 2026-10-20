@@ -60,8 +60,11 @@ def deliverable_presence_checks(submission, spec):
     return {'method': 'anonymized_file_presence_v1', 'checks': checks}
 
 
-def original_filename_checks(entries, username, full_name, spec):
-    """Check original names of a student's merged files (see merge_attempt_files)."""
+def original_filename_checks(entries, username, full_name, spec, owners=()):
+    """
+    Check original names of a student's merged files (see merge_attempt_files).
+    owners are the repository owners redacted from the artifact names.
+    """
     checks = []
     for deliverable in spec["deliverables"]:
         patterns = deliverable.get("file_patterns", [])
@@ -70,7 +73,8 @@ def original_filename_checks(entries, username, full_name, spec):
             if any(fnmatch.fnmatchcase(entry["path"].name, pattern.replace("username", username))
                    for pattern in patterns):
                 exact_paths.append(anonymize_relative_path(
-                    entry["relative_path"], index, username, full_name).as_posix())
+                    entry["relative_path"], index, username, full_name,
+                    owners).as_posix())
         checks.append({"deliverable_id": deliverable["deliverable_id"],
                        "status": ("exact_match" if exact_paths else "no_exact_match")
                                  if patterns else "not_checked",
@@ -122,7 +126,8 @@ def refresh_submission_checks(project_path):
                     "Artifact content differs from the prepared submission."
                 )
         old["deliverable_checks"] = original_filename_checks(
-            entries, identity["username"], identity["full_name"], spec)
+            entries, identity["username"], identity["full_name"], spec,
+            identity["redacted_repository_owners"])
     validate_anonymized_manifest(manifest, private_map)
     repository_map_path = grader / REPOSITORY_MAP_FILENAME
     if repository_map_path.is_file():

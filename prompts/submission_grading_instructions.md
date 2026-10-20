@@ -76,10 +76,12 @@ name was not found, not that the content is absent. Require review if the suppli
 checks are unavailable. Do not penalize a readable plot solely for its tool-renamed
 filename. Inspect notebook saved outputs before declaring an output missing.
 
-PDFs are presence-only evidence in this version. If the required evidence might be
-in a PDF, unsupported notebook output, or an unreadable image, flag the limitation
-for instructor review. A tool's inability to inspect evidence is not evidence of
-student failure. Distinguish a genuinely missing artifact from uninspected content.
+PDF text was extracted locally where possible and is supplied as pdf_extracted_text
+evidence; figures, images and page layout were not extracted, and a long PDF may be
+truncated. If the required evidence might be in a PDF figure, a PDF without
+extractable text, the truncated part of a PDF, an unreadable notebook, unsupported
+notebook output, or an unreadable image, flag the limitation for instructor review.
+A tool's inability to inspect evidence is not evidence of student failure. Distinguish a genuinely missing artifact from uninspected content.
 
 Cite a specific observed error or missing requirement for every deduction. Accept
 alternatives expressly allowed by the spec. Brief but complete discussion can earn

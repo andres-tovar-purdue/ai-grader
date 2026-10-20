@@ -2,7 +2,9 @@
 GitHub repositories linked from submissions, as grading evidence.
 
 Brightspace writes submissions\\index.html with each submission's text, which
-is where students paste repository links. When that file contains GitHub
+is where students paste repository links. A student without a repository
+link there may have one in their PDF report or notebook; those links, found
+before redaction, are used instead and labeled as such. When there are GitHub
 links, prepare-submissions:
 
 1. maps each index.html entry to Student_### through the in-memory student
@@ -98,7 +100,11 @@ NO_LINK_REASONS = {
     "non_github_link_only": "links only to sites other than GitHub",
     "no_link_in_submission_text": "no link in the submission text",
     "no_index_entry": "no entry in index.html",
+    "no_link_in_index_or_documents": "no GitHub link in index.html or in the PDF or notebook text",
 }
+
+LINK_SOURCE_INDEX = "brightspace_index_html"
+LINK_SOURCE_DOCUMENT = "submitted_document"
 
 
 class RepositoryEvidenceError(RuntimeError):
@@ -790,9 +796,14 @@ def add_repository_evidence(submission, identity, record, patterns, student_root
             "repository_owner": "<repo_owner>",
             "submission_time": cutoff.isoformat() if cutoff else None,
             "submission_time_basis": (
-                "Brightspace submission time of the selected attempt (local "
+                "Brightspace submission time of the newest attempt (local "
                 "time zone, end of that minute); commits compared by committer time"),
+            "repository_link_source": record.get("source", LINK_SOURCE_INDEX),
         }
+        if record.get("source") == LINK_SOURCE_DOCUMENT:
+            facts["repository_link_note"] = (
+                "Found in the student's PDF or notebook text, not in index.html; "
+                "it may be a cited repository rather than the student's own.")
         clone_path = Path(tempfile.mkdtemp(prefix="repo_", dir=work_path))
         try:
             status, reachable = clone_repository(owner, repo, clone_path / "checkout")
@@ -816,6 +827,11 @@ def add_repository_evidence(submission, identity, record, patterns, student_root
         next_index += 1
         statuses.append(status)
 
+    if record.get("source") == LINK_SOURCE_DOCUMENT:
+        submission["review_flags"].append(
+            "Repository link taken from the student's PDF or notebook text, not "
+            "from index.html; confirm it is the student's own repository.")
+
     if not repositories:
         facts = {
             "evidence_type": "github_repository_facts",
@@ -837,28 +853,84 @@ def add_repository_evidence(submission, identity, record, patterns, student_root
 
 
 def verify_repository_redaction(manifest, repository_map):
-    """Fail if a repository owner appears in that student's repository evidence."""
+    """Fail if a repository owner appears anywhere in that student's files."""
     for submission in manifest["submissions"]:
         entry = repository_map.get(submission["student_id"]) or {}
         if isinstance(entry, list):  # Maps written before candidates existed.
             entry = {"repositories": entry}
         owners = {item["owner"] for key in ("repositories", "profiles", "candidates")
                   for item in entry.get(key, [])}
-        evidence = json.dumps(
-            [file for file in submission["files"] if file.get("source") == REPOSITORY_SOURCE],
-            ensure_ascii=False,
-        )
+        # Owners are redacted from all of the student's file names and text.
+        evidence = json.dumps(submission["files"], ensure_ascii=False)
         for owner in owners:
-            if owner_pattern(owner).search(evidence):
+            # An owner too short to redact safely has no forms to look for.
+            if owner_forms(owner) and owner_pattern(owner).search(evidence):
                 raise RepositoryEvidenceError(
                     "Repository evidence contains an unredacted repository owner."
                 )
 
 
+def add_document_links(by_student, counts, student_map):
+    """
+    Give each student without a repository link in index.html the GitHub
+    repositories found in their PDF or notebook text, if any.
+
+    Returns (links by student ID, counts) like map_repositories, or
+    (None, None) when neither source has a repository link.
+    """
+
+    index_has_links = by_student is not None
+    if not index_has_links:
+        by_student = {}
+        counts = {
+            "index_entries": 0,
+            "index_entries_with_github_links": 0,
+            "index_entries_not_matched_to_a_student": 0,
+            "index_entries_with_github_links_not_matched": 0,
+        }
+
+    from_documents = []
+    for student_id in sorted(student_map):
+        record = by_student.get(student_id)
+        if record and record["repositories"]:
+            continue
+        links = student_map[student_id].get("document_github_links") or {}
+        repositories = [tuple(item) for item in links.get("repositories", [])]
+        if repositories:
+            by_student[student_id] = {"repositories": repositories, "profiles": [],
+                                      "reasons": [], "source": LINK_SOURCE_DOCUMENT}
+            from_documents.append(student_id)
+
+    if not index_has_links and not from_documents:
+        return None, None
+
+    without_link = {}
+    for student_id in sorted(student_map):
+        record = by_student.get(student_id)
+        if record and record["repositories"]:
+            continue
+        if record is None:
+            reason = "no_index_entry" if index_has_links else "no_link_in_index_or_documents"
+            by_student[student_id] = {"repositories": [], "profiles": [], "reasons": [],
+                                      "reason": reason}
+        without_link[student_id] = by_student[student_id]["reason"]
+
+    with_links = [record for record in by_student.values() if record["repositories"]]
+    counts.update({
+        "students_with_repository_urls": len(with_links),
+        "students_with_repository_urls_from_documents": from_documents,
+        "students_without_repository_urls": len(without_link),
+        "students_without_recognized_repository_link": without_link,
+        "repository_urls": sum(len(record["repositories"]) for record in with_links),
+    })
+    return by_student, counts
+
+
 def attach_repository_evidence(project_path, submissions, student_map,
                                anonymized_root, current_root):
     """
-    Add GitHub repository evidence when index.html contains GitHub links.
+    Add GitHub repository evidence when index.html, or a student's PDF or
+    notebook text, contains GitHub links.
 
     Returns (summary for the manifest, private repository map), or
     (None, None) when there are no GitHub links.
@@ -866,6 +938,7 @@ def attach_repository_evidence(project_path, submissions, student_map,
     project_path = Path(project_path)
     by_student, counts = map_repositories(
         project_path / "submissions" / INDEX_FILENAME, student_map)
+    by_student, counts = add_document_links(by_student, counts, student_map)
     if by_student is None:
         return None, None
 
@@ -877,8 +950,7 @@ def attach_repository_evidence(project_path, submissions, student_map,
     try:
         for submission in submissions:
             student_id = submission["student_id"]
-            record = by_student.get(student_id) or {
-                "repositories": [], "profiles": [], "reason": "no_index_entry"}
+            record = by_student[student_id]
             private = []
             linked = [repo for _, repo in record["repositories"]]
             statuses.extend(add_repository_evidence(
@@ -888,6 +960,7 @@ def attach_repository_evidence(project_path, submissions, student_map,
                 work_path, private,
             ))
             private_map[student_id] = {
+                "link_source": record.get("source", LINK_SOURCE_INDEX),
                 "repositories": [
                     {"owner": owner, "repository": repo,
                      "url": f"https://github.com/{owner}/{repo}"}

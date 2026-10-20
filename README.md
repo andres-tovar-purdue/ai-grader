@@ -99,9 +99,17 @@ redacted from text and filenames, including a first name or surname on its own
 (matched as a whole word, so "Chen" is not redacted inside "kitchen"). Image pixels are not redacted and may still
 require instructor review if visible identity is suspected.
 
+PDF reports are read locally: their text (not figures or images) is extracted with
+pypdf, redacted like other text, capped at 50,000 characters, and given to the
+grader. PDFs without extractable text are flagged for manual review. GitHub links
+in a student's PDF or notebook are used as repository evidence when index.html has
+none for that student, and the student is flagged for review.
+
 Rerunning `prepare-submissions` before grading replaces the earlier preparation
 (for example, after adding a late submission). Once `grader/grading_runs/` or
-`grader/debug_responses/` holds anything, it refuses and changes nothing.
+`grader/debug_responses/` holds anything, it refuses and changes nothing; set
+runs aside first with `python -m ai_grader archive-grading PROJECT_PATH` (moved
+to `grader/archive/`, never deleted; finalized runs are never moved).
 
 After the grading specification is instructor-approved, run:
 

@@ -19,6 +19,7 @@ from ai_grader.project_manifest import write_project_manifest
 from ai_grader.project_preparation import prepare_project
 from ai_grader.repo_evidence import NO_LINK_REASONS
 from ai_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
+from ai_grader.run_archive import ArchiveError, archive_grading
 from ai_grader.setup_check import run_setup_checks
 from ai_grader.spec_approval import approve_grading_spec
 from ai_grader.spec_generation import InvalidSpecResponseError, generate_grading_spec
@@ -410,6 +411,24 @@ def main():
         action="append",
         default=[],
         help="Criterion override as Student_###:CRITERION_ID=POINTS.",
+    )
+
+    # archive-grading command
+    archive_parser = subparsers.add_parser(
+        "archive-grading",
+        help=("Set grading runs aside in grader\\archive\\ (never deleted), "
+              "for example so prepare-submissions can run again."),
+    )
+    archive_parser.add_argument("project_path", help="Path to the project folder.")
+    archive_parser.add_argument(
+        "--run",
+        action="append",
+        help=("Grading run to archive, e.g. run_v001; repeat for several. "
+              "Default: all runs. Saved responses are archived once no run is left."),
+    )
+    archive_parser.add_argument(
+        "--reason",
+        help="Why the runs are set aside; kept in the archive record.",
     )
 
     # check-setup command
@@ -945,9 +964,11 @@ def main():
             print(error)
             print()
             print("To grade again with the current preparation, run grade-submissions.")
-            print("To prepare again anyway, first move grader\\grading_runs\\ and")
-            print("grader\\debug_responses\\ out of the project folder (archive them;")
-            print("they match the current student numbers), then rerun this command.")
+            print("To prepare again anyway, set the grading runs and saved responses")
+            print("aside first (they are moved to grader\\archive\\, not deleted):")
+            print_next_command(
+                f'python -m ai_grader archive-grading "{args.project_path}"'
+            )
             raise SystemExit(1)
 
         anonymized_path = (
@@ -999,11 +1020,19 @@ def main():
         repositories = manifest.get("repository_evidence")
         if repositories:
             print()
-            print("GitHub repositories linked in submissions\\index.html:")
+            print("GitHub repositories linked in submissions\\index.html "
+                  "or in the students' PDF or notebook text:")
             print(f"  Students with repository links: "
                   f"{repositories['students_with_repository_urls']}")
             print(f"  Students without repository links: "
                   f"{repositories['students_without_repository_urls']}")
+            from_documents = repositories.get(
+                "students_with_repository_urls_from_documents", [])
+            if from_documents:
+                print("  Links taken from PDF or notebook text (no link in "
+                      "index.html; flagged for review):")
+                for student_id in from_documents:
+                    print(f"    - {student_id}")
             for status, count in repositories["fetch_status_counts"].items():
                 print(f"  {status.replace('_', ' ')}: {count}")
             missing = repositories["students_without_recognized_repository_link"]
@@ -1151,6 +1180,41 @@ def main():
         print("Grading workflow complete.")
         print("Review the final instructor summary and student feedback before")
         print("entering grades in Brightspace.")
+
+    elif args.command == "archive-grading":
+        try:
+            archive_path, moved = archive_grading(
+                args.project_path, args.run, args.reason)
+        except ArchiveError as error:
+            print()
+            print(error)
+            raise SystemExit(1)
+        except OSError as error:
+            print()
+            print(f"Stopped while moving: {error.strerror or error}. Nothing was "
+                  "deleted; the archive record lists what was moved.")
+            raise SystemExit(1)
+
+        print()
+        print("Set aside (moved, not deleted) to:")
+        print(f"  {archive_path}")
+        for item in moved:
+            print(f"  - {item}")
+
+        grader_path = Path(args.project_path).resolve() / "grader"
+        from ai_grader.submission_processing import grading_started
+        still = grading_started(grader_path)
+        if still is None:
+            print()
+            print("No grading runs or saved responses remain, so submissions "
+                  "can be prepared again.")
+            print_next_command(
+                f'python -m ai_grader prepare-submissions "{args.project_path}"'
+            )
+        else:
+            print()
+            print(f"Still in use: {still}. prepare-submissions stays blocked "
+                  "until every run is archived.")
 
     elif args.command == "check-setup":
         if not args.skip_api:
