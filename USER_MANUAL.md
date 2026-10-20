@@ -769,13 +769,38 @@ Finalization creates a versioned folder under:
 grader\finalizations\run_v###\finalization_v###\
 ```
 
-The finalization contains an instructor summary CSV, one student-facing feedback TXT file per student, and offline validation of name mapping, score arithmetic, and feedback consistency.
+The finalization contains:
+
+- an instructor summary CSV;
+- one student-facing feedback TXT file per student;
+- `brightspace_feedback.csv` (Username, Student, Grade, Out of, Feedback) and `brightspace_feedback_to_paste.txt` (every student's feedback, by last name, for pasting into Brightspace);
+- `final_grades.json`, the private record the Brightspace export reads;
+- offline validation of name mapping, score arithmetic, and feedback consistency.
+
+These files contain student names and grades. Keep them in the project folder. `finalize-grading` prints only counts and file names, never student names.
 
 The anonymous grading run is not overwritten.
 
 Review the final instructor summary and student feedback before releasing grades.
 
-AI Grader does **not** currently post grades to Brightspace automatically. The instructor or grader verifies the outputs and enters the grades manually.
+### Brightspace grades import CSV
+
+AI Grader fills in a grades export that you download from Brightspace, so the file has exactly the columns and student keys your course uses:
+
+1. In Brightspace, open **Grades > Export**. Choose **Username** (or Both) as the key field, select **Points grade**, and select only this assignment's grade item. Export to CSV and save it, for example in the project folder.
+2. Run, from the workspace:
+
+```powershell
+python -m ai_grader export-brightspace ".\projects\PROJECT_ID" --run run_v001 --template ".\projects\PROJECT_ID\GRADES_EXPORT.csv"
+```
+
+Or add `--brightspace-template ".\projects\PROJECT_ID\GRADES_EXPORT.csv"` to `finalize-grading` to do both in one step. If the export has several grade items, add `--grade-item "ITEM NAME"`.
+
+AI Grader writes `brightspace_grades_import.csv` in the finalization folder: the identifier columns, the grade item's Points Grade column and the End-of-Line Indicator, one row per finalized student. Students in the export without a final grade here (for example, no submission) are left out and counted; their Brightspace grades are not changed. AI Grader refuses, and writes nothing, if the export has no Username column, lists a student twice, is missing a finalized student, or the grade item's maximum points differ from the project total (grades are never rescaled).
+
+3. In Brightspace, open **Grades > Import**, choose the file, and review the preview before confirming. Whether students see imported grades right away depends on the grade item's visibility settings in Brightspace; check them first if grades should stay hidden until you release them.
+
+AI Grader never uploads or releases anything. The grades import CSV carries grades only (as far as we know, Brightspace's grades import does not set assignment feedback), so paste each student's feedback from `brightspace_feedback_to_paste.txt` (or the feedback CSV) into the assignment's feedback in Brightspace.
 
 ---
 
@@ -923,7 +948,13 @@ Create a named instructor review CSV with blank approval fields. `--run` default
 python -m ai_grader finalize-grading PROJECT_PATH --run RUN_ID --score Student_###=POINTS
 ```
 
-Create final instructor and student-facing reports from instructor-approved scores.
+Create final instructor and student-facing reports from instructor-approved scores, including Brightspace feedback files. Add `--brightspace-template EXPORT.csv` to also write the Brightspace grades import CSV.
+
+```text
+python -m ai_grader export-brightspace PROJECT_PATH --run RUN_ID --template EXPORT.csv
+```
+
+Write `brightspace_grades_import.csv` in the latest finalization of the run (or `--finalization finalization_v###`), from a grades export downloaded from Brightspace (key field Username, Points grade). Add `--grade-item "NAME"` if the export has several items.
 
 ---
 

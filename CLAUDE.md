@@ -11,7 +11,7 @@ AI Grader is a human-supervised AI grading assistant for instructors and student
 - Activate the venv before running anything:
   - from the repo root: `.\.venv\Scripts\Activate.ps1`
   - from the workspace (`..`): `.\ai-grader\.venv\Scripts\Activate.ps1`
-- CLI: `python -m ai_grader <command>`, run from the workspace (`init-project` creates projects under `.\projects\` relative to the current directory, so running it from the repo root would put them inside the repo). Commands: check-setup, init-project, prepare-project, validate, inspect, manifest, generate-spec, approve-spec, prepare-submissions, refresh-submission-checks, grade-submissions, recover-grading, archive-grading, generate-report, finalize-grading.
+- CLI: `python -m ai_grader <command>`, run from the workspace (`init-project` creates projects under `.\projects\` relative to the current directory, so running it from the repo root would put them inside the repo). Commands: check-setup, init-project, prepare-project, validate, inspect, manifest, generate-spec, approve-spec, prepare-submissions, refresh-submission-checks, grade-submissions, recover-grading, archive-grading, generate-report, finalize-grading, export-brightspace.
 - Model: `OPENAI_MODEL` from `.env`; the single fallback is `DEFAULT_MODEL` in `ai_client.py` (use `resolve_model()`, don't add new defaults). Commands that call the model print `describe_model()` first.
 - Tests: from the repo root, `python -m unittest discover -s tests -v`. The suite mocks OpenAI and needs no API key. Run it before saying work is done.
 

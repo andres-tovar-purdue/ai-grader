@@ -1,5 +1,6 @@
 import json
 import math
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -71,6 +72,31 @@ def artifact_review_reasons(submission):
                     f"{file['path']} could not be read as a notebook; its cells "
                     "and outputs were not graded. Review it manually.")
     return reasons
+
+
+ARTIFACT_NUMBER = re.compile(r"artifact_(\d{3,})_")
+
+
+def resolve_artifact_path(cited, artifact_paths):
+    """
+    The full path of an artifact cited without its folders, for example
+    "artifact_010_beam_model.py" for "github_repo/artifact_010_beam_model.py".
+    Artifact numbers are unique within a student's files, so a cited file
+    name resolves when exactly one artifact has that number and that name.
+    Returns None otherwise.
+    """
+    name = cited.replace("\\", "/").rsplit("/", 1)[-1]
+    match = ARTIFACT_NUMBER.match(name)
+    if not match:
+        return None
+    candidates = [path for path in artifact_paths
+                  if path.rsplit("/", 1)[-1] == name]
+    numbered = [path for path in artifact_paths
+                if (found := ARTIFACT_NUMBER.match(path.rsplit("/", 1)[-1]))
+                and found.group(1) == match.group(1)]
+    if len(candidates) == 1 and numbered == candidates:
+        return candidates[0]
+    return None
 
 
 def calculate_grading_result(
@@ -193,9 +219,13 @@ def calculate_grading_result(
             for evidence in result["evidence"]:
                 path = evidence["artifact_path"]
                 if path is not None and path not in artifact_paths:
-                    raise ValueError(
-                        f"Unknown evidence path for {criterion['criterion_id']}: {path}"
-                    )
+                    resolved = resolve_artifact_path(path, artifact_paths)
+                    if resolved is None:
+                        raise ValueError(
+                            f"Unknown evidence path for {criterion['criterion_id']}: {path}"
+                        )
+                    evidence["artifact_path"] = resolved
+                    evidence["artifact_path_as_cited"] = path
                 if evidence["evidence_type"] == "unverifiable":
                     result["review_required"] = True
                     if not result["review_reasons"]:

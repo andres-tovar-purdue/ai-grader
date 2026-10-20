@@ -7,6 +7,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from ai_grader.ai_client import DEFAULT_MODEL, describe_model
+from ai_grader.brightspace import (
+    FEEDBACK_CSV_FILENAME, FEEDBACK_TEXT_FILENAME, BrightspaceError, export_brightspace,
+)
 from ai_grader.finalization import finalize_grading, load_approved_scores
 from ai_grader.grading import grade_submissions
 from ai_grader.recovery import recover_grading
@@ -212,6 +215,16 @@ def latest_finalization_for_run(project_path, grading_run):
     return finalization_paths[-1] if finalization_paths else None
 
 
+def print_brightspace_summary(summary):
+    print()
+    print(f"Brightspace grades import CSV: {summary['path']}")
+    print(f"  Grade column: {summary['grade_column']}")
+    print(f"  Students with a final grade: {summary['students_written']}")
+    if summary["export_rows_without_final_grade"]:
+        print(f"  Students in the export without a final grade here (left out): "
+              f"{summary['export_rows_without_final_grade']}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AI Grader"
@@ -412,6 +425,31 @@ def main():
         default=[],
         help="Criterion override as Student_###:CRITERION_ID=POINTS.",
     )
+    finalize_parser.add_argument(
+        "--brightspace-template",
+        help=("Grades export downloaded from Brightspace for this grade item "
+              "(key field Username, Points grade). Also writes the grades import CSV."),
+    )
+    finalize_parser.add_argument(
+        "--grade-item",
+        help="Brightspace grade item name, if the export has several.",
+    )
+
+    # export-brightspace command
+    export_parser = subparsers.add_parser(
+        "export-brightspace",
+        help=("Write a Brightspace grades import CSV from a finalization, using a "
+              "grades export downloaded from Brightspace as the template."),
+    )
+    export_parser.add_argument("project_path", help="Path to the project folder.")
+    export_parser.add_argument("--run", required=True, help="Grading run, e.g. run_v002.")
+    export_parser.add_argument(
+        "--template", required=True,
+        help="Grades export from Brightspace (key field Username, Points grade).")
+    export_parser.add_argument(
+        "--finalization", help="Finalization folder, e.g. finalization_v001. Default: latest.")
+    export_parser.add_argument(
+        "--grade-item", help="Brightspace grade item name, if the export has several.")
 
     # archive-grading command
     archive_parser = subparsers.add_parser(
@@ -1194,14 +1232,49 @@ def main():
 
         print()
         print(f"Finalization written to: {output_path}")
-        print(f"Instructor summary: {csv_path}")
-        for path in txt_paths:
-            print(f"Student feedback: {path}")
+        # File names below hold no student names; the folder's files do.
+        print(f"Instructor summary: {csv_path.name}")
+        print(f"Student feedback files: {len(txt_paths)} (one per student)")
+        print(f"Feedback for Brightspace: {FEEDBACK_CSV_FILENAME}, "
+              f"{FEEDBACK_TEXT_FILENAME} (by last name)")
         print(f"Offline validation: {json.dumps(validation, sort_keys=True)}")
+        if args.brightspace_template:
+            try:
+                summary = export_brightspace(
+                    args.project_path, args.run, args.brightspace_template,
+                    output_path.name, args.grade_item)
+            except (BrightspaceError, OSError) as error:
+                print()
+                print(f"Brightspace grades CSV not written: {error}")
+                print("The finalization above is complete; fix the export and run "
+                      "export-brightspace.")
+                raise SystemExit(1)
+            print_brightspace_summary(summary)
         print()
         print("Grading workflow complete.")
         print("Review the final instructor summary and student feedback before")
-        print("entering grades in Brightspace.")
+        print("entering grades in Brightspace. Nothing has been uploaded.")
+        if not args.brightspace_template:
+            print()
+            print("To make the Brightspace grades import CSV, export this grade item "
+                  "from Brightspace (Grades > Export: key field Username, Points grade) "
+                  "and run:")
+            print()
+            print(f'python -m ai_grader export-brightspace "{args.project_path}" '
+                  f'--run {args.run} --template "PATH_TO_EXPORT.csv"')
+
+    elif args.command == "export-brightspace":
+        try:
+            summary = export_brightspace(args.project_path, args.run, args.template,
+                                         args.finalization, args.grade_item)
+        except (BrightspaceError, OSError) as error:
+            print()
+            print(f"Brightspace grades CSV not written: {error}")
+            raise SystemExit(1)
+        print_brightspace_summary(summary)
+        print()
+        print("Nothing has been uploaded. Review the file, then import it in "
+              "Brightspace (Grades > Import).")
 
     elif args.command == "archive-grading":
         try:

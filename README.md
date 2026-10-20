@@ -156,6 +156,13 @@ versioned output beneath `grader/grading_runs/run_v###/`:
 The CSV leaves `total_instructor_score` blank. No final score or Brightspace update
 is performed automatically.
 
+After the instructor approves scores, `finalize-grading` writes the instructor
+summary, per-student feedback, and Brightspace feedback files (CSV and one text
+file to paste from). `export-brightspace` (or `finalize-grading
+--brightspace-template`) fills a grades export downloaded from Brightspace into
+`brightspace_grades_import.csv` for Grades > Import. AI Grader never uploads or
+releases grades.
+
 ## Current Limitations and Roadmap
 
 The Project 2 and Project 3 demonstrations also identified areas for further
@@ -171,6 +178,6 @@ that are already complete:
    rubric-based results.
 7. Make workflow runs immutable and versioned while simplifying the current folder
    structure.
-8. Improve Brightspace export and eventually support Brightspace API integration;
-   submission remains manual today.
+8. Brightspace API integration (grades and feedback); today the grades import CSV
+   and feedback are uploaded by the instructor.
 9. Add regression tests based on deidentified Project 2 and Project 3 cases.

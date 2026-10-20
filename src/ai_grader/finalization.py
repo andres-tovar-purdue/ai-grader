@@ -4,6 +4,7 @@ import math
 import re
 from pathlib import Path
 
+from ai_grader.brightspace import feedback_body, write_student_outputs
 from ai_grader.spec_validation import validate_spec_data, load_json
 from ai_grader.submission_checks import spec_fingerprint
 from ai_grader.rounding import apply_rounding
@@ -137,6 +138,7 @@ def finalize_grading(
         raise ValueError("Duplicate student results in grading run.")
     rows = []
     text_outputs = {}
+    brightspace_records = []
     for result in run["results"]:
         student_id = result["student_id"]
         full_name = student_map[student_id]["full_name"]
@@ -202,6 +204,14 @@ def finalize_grading(
             f"{_safe_filename(full_name)}_{file_prefix}_feedback.txt"
         )
         text_outputs[student_id] = (filename, rendered)
+        brightspace_records.append({
+            "student_id": student_id,
+            "username": student_map[student_id].get("username", ""),
+            "name": full_name,
+            "final_grade": approved_total,
+            "max_points": project_maximum,
+            "feedback": feedback_body(rendered),
+        })
 
         row = {
             "actual_student_name": full_name,
@@ -243,6 +253,8 @@ def finalize_grading(
         path = output_path / filename
         path.write_text(rendered, encoding="utf-8")
         txt_paths.append(path)
+
+    write_student_outputs(output_path, brightspace_records)
 
     validation = validate_finalization(
         output_path,
