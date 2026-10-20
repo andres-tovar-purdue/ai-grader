@@ -99,7 +99,8 @@ and physical agent-facing copies beneath
 merged: every file from every attempt is kept, and the newest attempt's copy wins
 when a file appears more than once. Known usernames and student names are
 redacted from text and filenames, including a first name or surname on its own
-(matched as a whole word, so "Chen" is not redacted inside "kitchen"). Image pixels are not redacted and may still
+and handles built from them such as "jchen" or "chenj" (matched as whole words,
+so "Chen" is not redacted inside "kitchen"). Image pixels are not redacted and may still
 require instructor review if visible identity is suspected.
 
 PDF reports are read locally: their text (not figures or images) is extracted with
