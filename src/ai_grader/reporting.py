@@ -9,6 +9,11 @@ import sys
 from pathlib import Path
 
 
+# Rounding detail stays in preliminary_grading_report.csv and grading_results.json;
+# the instructor's review file shows the rounded totals only.
+REVIEW_HIDDEN_COLUMNS = ("raw_total_before_rounding", "total_rounding_adjustment")
+
+
 def generate_review_report(project_path, run_version=None):
     grader = Path(project_path).resolve() / "grader"
     runs = grader / "grading_runs"
@@ -60,8 +65,10 @@ def generate_review_report(project_path, run_version=None):
             break
         except FileExistsError:
             version += 1
+    shown = [name for name in fields if name not in REVIEW_HIDDEN_COLUMNS]
     with stream:
-        writer = csv.DictWriter(stream, fieldnames=["student_name", *fields])
+        writer = csv.DictWriter(stream, fieldnames=["student_name", *shown],
+                                extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
     return output

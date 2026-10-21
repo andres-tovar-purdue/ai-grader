@@ -845,7 +845,7 @@ grader\finalizations\run_v###\finalization_v###\
 
 The finalization contains:
 
-- `final_grades_for_brightspace.csv`: Username, Student, Final Grade, Out of, Comment, by last name. This is the file for Brightspace; it has no itemized scores;
+- `final_grades_for_brightspace.csv`: Student, Username, Final Grade (the adjusted grade) and Comment, by last name. This is the file for Brightspace; it has no itemized scores;
 - an instructor summary CSV with the itemized scores, the approved total, the final adjustment, the final grade and comment;
 - one student-facing feedback TXT file per student;
 - `brightspace_feedback.csv` (Username, Student, Grade, Out of, Feedback) and `brightspace_feedback_to_paste.txt` (every student's feedback, by last name, for pasting into Brightspace);

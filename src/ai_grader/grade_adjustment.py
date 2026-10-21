@@ -478,9 +478,11 @@ def adjust_grades(project_path, run_version, instructions=None, plan=None,
                         "comment_source": comments[row["student_id"]][1]})
 
     leading = [name for name in ("student_name", "student_id") if name in fields]
-    rest = [name for name in fields if name not in leading and name not in ADJUSTMENT_COLUMNS]
+    rest = [name for name in fields if name not in leading and name not in ADJUSTMENT_COLUMNS
+            and name not in ("raw_total_before_rounding", "total_rounding_adjustment")]
     with output.open("x", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=leading + ADJUSTMENT_COLUMNS + rest)
+        writer = csv.DictWriter(stream, fieldnames=leading + ADJUSTMENT_COLUMNS + rest,
+                                extrasaction="ignore")
         writer.writeheader()
         writer.writerows(out_rows)
 

@@ -333,6 +333,9 @@ class RoundTests(unittest.TestCase):
         self.assertEqual(record["comments"]["ai"], 11)
         self.assertEqual(len(read_rows(self.v001)[0]), len(read_rows(self.v001)[0]))
         self.assertNotIn("adjusted_grade", read_rows(self.v001)[0])     # v001 untouched.
+        for rounding_detail in ("raw_total_before_rounding", "total_rounding_adjustment"):
+            self.assertNotIn(rounding_detail, read_rows(self.v001)[0])
+            self.assertNotIn(rounding_detail, read_rows(summary["path"])[0])
 
     def test_later_rounds_revise_the_plan_and_keep_hand_edits(self):
         first = self.adjust(FakeModel([target_plan()]))
@@ -413,7 +416,8 @@ class RoundTests(unittest.TestCase):
         self.assertTrue(validation["csv_txt_grades_agree"])
         final = {row["Username"]: row for row in read_rows(output / FINAL_CSV_FILENAME)}
         self.assertEqual(list(read_rows(output / FINAL_CSV_FILENAME)[0]),
-                         ["Username", "Student", "Final Grade", "Out of", "Comment"])
+                         ["Student", "Username", "Final Grade", "Comment"])
+        self.assertEqual(final["user01"]["Student"], "Avery SampleA")
         self.assertEqual((final["user01"]["Final Grade"], final["user03"]["Final Grade"],
                           final["user10"]["Final Grade"]), ("76", "85", "100"))
         self.assertEqual(final["user04"]["Comment"], "Solid model; tighten the report.")
