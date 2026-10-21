@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from ai_grader.brightspace import feedback_body, write_student_outputs
+from ai_grader.grade_adjustment import template_comment
 from ai_grader.spec_validation import validate_spec_data, load_json
 from ai_grader.submission_checks import spec_fingerprint
 from ai_grader.rounding import apply_rounding
@@ -65,6 +66,10 @@ def _next_finalization_path(grader_path, run_version):
 
 def _overall_feedback(tasks):
     scored = [task for task in tasks if task["max_points"] > 0]
+    if all(task["score"] >= task["max_points"] for task in scored):
+        return ("Every part of the assignment met the requirements. The final grade "
+                "reflects the completed technical work, required documentation, "
+                "and submitted deliverables.")
     strongest = max(scored, key=lambda task: task["score"] / task["max_points"])
     focus = min(scored, key=lambda task: task["score"] / task["max_points"])
     return (
@@ -90,8 +95,16 @@ def finalize_grading(
     run_version,
     approved_scores,
     criterion_overrides=None,
+    decisions=None,
 ):
-    """Create named final outputs without modifying an anonymous grading run."""
+    """
+    Create named final outputs without modifying an anonymous grading run.
+    approved_scores are the instructor-approved totals of the itemized
+    scores. decisions (from an adjusted review file) give each student's
+    final grade and comment after the final adjustment; without them the
+    final grade is the approved total and the comment is generated from the
+    task scores.
+    """
     project_path = Path(project_path).resolve()
     grader = project_path / "grader"
     if not re.fullmatch(r"run_v[0-9]{3}", run_version):
@@ -128,6 +141,8 @@ def finalize_grading(
     result_ids = {result["student_id"] for result in run["results"]}
     if result_ids != set(student_map) or result_ids != set(approved_scores):
         raise ValueError("Run results, student map, and approved scores do not align.")
+    if decisions is not None and set(decisions) != result_ids:
+        raise ValueError("Run results and adjusted grades do not align.")
 
     valid_overrides = {(result["student_id"], criterion["criterion_id"])
                        for result in run["results"] for task in spec["tasks"]
@@ -178,13 +193,26 @@ def finalize_grading(
             raise ValueError(f"Calculated final score for {student_id} is "
                              f"{rounded['final_rounded_grade']:g}, not approved score {approved_total:g}.")
 
+        if decisions is not None:
+            final_grade = float(decisions[student_id]["final_grade"])
+            final_comment = decisions[student_id]["comment"]
+            edited = decisions[student_id].get("grade_edited_by_hand", False)
+        else:
+            final_grade, final_comment, edited = approved_total, template_comment(tasks), False
+        if not math.isfinite(final_grade) or not 0 <= final_grade <= project_maximum:
+            raise ValueError(f"Final grade for {student_id} is outside the project point range.")
+        adjustment = round(final_grade - approved_total, 6)
+
         overall = _overall_feedback(tasks)
         student_text = [
             full_name,
             spec["project"]["title"],
-            f"Final Grade: {approved_total:g}/{project_maximum:g}",
-            "",
+            f"Final Grade: {final_grade:g}/{project_maximum:g}",
         ]
+        if adjustment:
+            student_text.append(f"Grade before adjustment: {approved_total:g}/"
+                                f"{project_maximum:g} (adjustment: {adjustment:+g})")
+        student_text.extend(["", final_comment, ""])
         for task in tasks:
             student_text.extend([
                 f"{task['title']}: {task['score']:g}/{task['max_points']:g}",
@@ -195,7 +223,7 @@ def finalize_grading(
             "Overall Feedback",
             overall,
             "",
-            f"Final Grade: {approved_total:g}/{project_maximum:g}",
+            f"Final Grade: {final_grade:g}/{project_maximum:g}",
             "",
         ])
         rendered = "\n".join(student_text)
@@ -208,9 +236,10 @@ def finalize_grading(
             "student_id": student_id,
             "username": student_map[student_id].get("username", ""),
             "name": full_name,
-            "final_grade": approved_total,
+            "final_grade": final_grade,
             "max_points": project_maximum,
             "feedback": feedback_body(rendered),
+            "comment": final_comment,
         })
 
         row = {
@@ -220,6 +249,10 @@ def finalize_grading(
             "final_instructor_score": approved_total,
             "overall_feedback": overall,
             "final_rounding_adjustment": round(approved_total - sum(t["score"] for t in tasks), 6),
+            "final_adjustment": adjustment,
+            "final_grade": final_grade,
+            "final_grade_edited_by_hand": str(edited).lower(),
+            "final_comment": final_comment,
         }
         for index, task in enumerate(tasks, start=1):
             row[f"task_{index}_score"] = task["score"]
@@ -242,6 +275,10 @@ def finalize_grading(
         ],
         "overall_feedback",
         "final_rounding_adjustment",
+        "final_adjustment",
+        "final_grade",
+        "final_grade_edited_by_hand",
+        "final_comment",
     ]
     with csv_path.open("w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
@@ -296,6 +333,10 @@ def validate_finalization(output_path, expected_rows, text_outputs, approved_sco
             raise ValueError(f"Task arithmetic failed for {student_id}.")
         if abs(final_score - float(approved_scores[student_id])) > 1e-6:
             raise ValueError(f"CSV grade mismatch for {student_id}.")
+        if "final_grade" in row:
+            if abs(final_score + float(row["final_adjustment"]) - float(row["final_grade"])) > 1e-6 \
+                    or abs(float(row["final_grade"]) - float(expected["final_grade"])) > 1e-6:
+                raise ValueError(f"Final adjustment arithmetic failed for {student_id}.")
 
     txt_paths = sorted(output_path.glob("*_feedback.txt"))
     if len(txt_paths) != len(expected_rows):
@@ -303,7 +344,7 @@ def validate_finalization(output_path, expected_rows, text_outputs, approved_sco
     for student_id, (filename, _) in text_outputs.items():
         text = (output_path / filename).read_text(encoding="utf-8")
         _validate_student_language(text)
-        final = float(approved_scores[student_id])
+        final = float(expected_by_id[student_id].get("final_grade", approved_scores[student_id]))
         marker = f"Final Grade: {final:g}/{project_maximum:g}"
         if text.count(marker) != 2:
             raise ValueError(f"TXT grade mismatch for {student_id}.")

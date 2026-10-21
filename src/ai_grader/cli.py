@@ -8,8 +8,11 @@ from dotenv import load_dotenv
 
 from ai_grader.ai_client import DEFAULT_MODEL, describe_model
 from ai_grader.brightspace import (
-    FEEDBACK_CSV_FILENAME, FEEDBACK_TEXT_FILENAME, BrightspaceError, export_brightspace,
+    FEEDBACK_CSV_FILENAME, FEEDBACK_TEXT_FILENAME, FINAL_CSV_FILENAME, BrightspaceError,
+    export_brightspace,
 )
+from ai_grader.adjustments import AdjustmentError
+from ai_grader.grade_adjustment import adjust_grades, adjusted_review_decisions
 from ai_grader.finalization import finalize_grading, load_approved_scores
 from ai_grader.grading import grade_submissions
 from ai_grader.recovery import recover_grading
@@ -225,6 +228,56 @@ def print_brightspace_summary(summary):
               f"{summary['export_rows_without_final_grade']}")
 
 
+def print_adjustment_summary(summary):
+    """The plan, the curve, target checks and anonymous before/after grades."""
+    print()
+    print(f"Started from {summary['source_review']}. What AI Grader will do:")
+    for line in summary["plan"]["summary"]:
+        print(f"  - {line}")
+    if summary["plan"]["not_supported"]:
+        print()
+        print("NOT applied (AI Grader can't do these; tell me another way or change "
+              "the itemized scores in the review):")
+        for line in summary["plan"]["not_supported"]:
+            print(f"  - {line}")
+    closest = [r["student_id"] for r in summary["readings"] if r["match"] == "closest"]
+    if closest:
+        print()
+        print("Check: a name in your instructions did not match exactly and was read as "
+              + ", ".join(closest) + ".")
+    edits = summary["hand_edits"]
+    if edits["grades"] or edits["comments"]:
+        print()
+        print(f"Kept your hand edits: {len(edits['grades'])} grade(s), "
+              f"{len(edits['comments'])} comment(s).")
+    print()
+    print(f"Curve: {summary['description']}")
+    print(f"  Equation: {summary['equation']}")
+    print(f"  Rounding: {summary['plan']['rounding']} (up)")
+    for label in ("before", "after"):
+        stats = summary[label]
+        print(f"  {label.capitalize():6} lowest {stats['min']:g}  mean {stats['mean']:g}  "
+              f"median {stats['median']:g}  highest {stats['max']:g}")
+    for item in summary["checks"]:
+        print(f"  [{'met' if item['met'] else 'NOT MET'}] {item['target']} at least "
+              f"{item['at_least']:g}: {item['achieved']:g}")
+    if summary["reordered_pairs"]:
+        print(f"  Note: mappings or overrides changed the order of "
+              f"{summary['reordered_pairs']} pair(s) of students.")
+    comments = summary["comments"]
+    print(f"Short comments: {comments['ai']} written by the model, "
+          f"{comments['template']} from the task scores"
+          + (f" ({comments['fallbacks']} model comment(s) failed checks)"
+             if comments["fallbacks"] else ""))
+    print()
+    print("  Student      Before  After  Change  Set by    Comment starts with")
+    for student in summary["students"]:
+        opener = student["opener"] or ""
+        print(f"  {student['student_id']:<12} {student['grade_before_adjustment']:>6g} "
+              f"{student['adjusted_grade']:>6g} {student['change']:>+7g}  "
+              f"{student['set_by']:<9} {opener}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AI Grader"
@@ -434,6 +487,35 @@ def main():
         "--grade-item",
         help="Brightspace grade item name, if the export has several.",
     )
+
+    # adjust-grades command
+    adjust_parser = subparsers.add_parser(
+        "adjust-grades",
+        help=("Final adjustments in plain words (a curve, raising grades, comment "
+              "wording): writes the next instructor_review_v###.csv with adjusted "
+              "grades and short comments for you to check."),
+    )
+    adjust_parser.add_argument("project_path", help="Path to the project folder.")
+    adjust_parser.add_argument("--run", required=True, help="Grading run, e.g. run_v002.")
+    what = adjust_parser.add_mutually_exclusive_group(required=True)
+    what.add_argument("--instructions",
+                      help='The adjustments in your words, in quotes, e.g. "Curve so the '
+                           'lowest grade is at least 75 and the average at least 90."')
+    what.add_argument("--instructions-file",
+                      help="A text file with the adjustments in your words.")
+    what.add_argument("--plan-file",
+                      help="Advanced: a ready adjustment plan (JSON, "
+                           "schemas/grade_adjustment_plan.schema.json); no model call.")
+    adjust_parser.add_argument(
+        "--from", dest="source_review",
+        help="Review file to start from. Default: the run's latest instructor_review_v###.csv.")
+    adjust_parser.add_argument(
+        "--restart", action="store_true",
+        help="Ignore earlier rounds' instructions and hand edits; start a new plan.")
+    adjust_parser.add_argument(
+        "--template-comments", action="store_true",
+        help="Write short comments from the task scores without the model.")
+    adjust_parser.add_argument("--model", help="Model for this command. Default: OPENAI_MODEL.")
 
     # export-brightspace command
     export_parser = subparsers.add_parser(
@@ -1199,20 +1281,76 @@ def main():
         except (ValueError, OSError, KeyError) as error:
             parser.error(str(error))
         print(f"Named instructor review report: {report_path}")
-        print("Review each submission and fill total_instructor_score, then save the CSV.")
+        print("Review the AI scores. Where you disagree, enter your total in "
+              "total_instructor_score and save the CSV.")
         print("Final scores remain unapproved until you complete the review.")
+        print()
+        print("Next, describe any final adjustments (a curve, raised grades, comment "
+              "wording) in your words; AI Grader writes the next review file with "
+              "adjusted grades and short comments. For no adjustment, say so:")
         print_next_command(
-            f'python -m ai_grader finalize-grading "{args.project_path}" '
-            f'--run {report_path.parent.name} --scores-file "{report_path}"'
+            f'python -m ai_grader adjust-grades "{args.project_path}" '
+            f'--run {report_path.parent.name} --instructions "No curve. Keep the grades."'
         )
+        print()
+        print("Or, if you entered every student's total_instructor_score yourself, "
+              "finalize directly:")
+        print()
+        print(f'python -m ai_grader finalize-grading "{args.project_path}" '
+              f'--run {report_path.parent.name} --scores-file "{report_path}"')
         if args.open:
             try:
                 open_report(report_path)
             except (OSError, subprocess.SubprocessError) as error:
                 print(f"Report saved, but could not open it automatically: {error}")
 
+    elif args.command == "adjust-grades":
+        try:
+            instructions, plan = args.instructions, None
+            if args.instructions_file:
+                instructions = Path(args.instructions_file).read_text(encoding="utf-8-sig")
+            if args.plan_file:
+                plan = json.loads(Path(args.plan_file).read_text(encoding="utf-8-sig"))
+            if instructions is not None or not args.template_comments:
+                print(describe_model(args.model))
+            summary = adjust_grades(
+                args.project_path, args.run, instructions=instructions, plan=plan,
+                source_review=args.source_review, restart=args.restart,
+                use_model_comments=not args.template_comments, model=args.model)
+        except (AdjustmentError, OSError, json.JSONDecodeError, RuntimeError) as error:
+            print()
+            print(f"No grades were adjusted: {error}")
+            raise SystemExit(1)
+        print_adjustment_summary(summary)
+        print()
+        print(f"Review file with adjusted grades: {summary['path']}")
+        print("Open it and check adjusted_grade and final_comment. You can edit either "
+              "by hand; your edits are kept in later rounds.")
+        print()
+        print("To change something, describe it (the earlier instructions still apply):")
+        print()
+        print(f'python -m ai_grader adjust-grades "{args.project_path}" --run {args.run} '
+              '--instructions "..."')
+        print_next_command(
+            f'python -m ai_grader finalize-grading "{args.project_path}" '
+            f'--run {args.run} --scores-file "{summary["path"]}"')
+
     elif args.command == "finalize-grading":
-        approved_scores = load_approved_scores(args.scores_file) if args.scores_file else {}
+        decisions = None
+        try:
+            if args.scores_file:
+                approved_scores, decisions = adjusted_review_decisions(args.scores_file)
+                if approved_scores is None:
+                    approved_scores = load_approved_scores(args.scores_file)
+            else:
+                approved_scores = {}
+        except (AdjustmentError, ValueError, OSError) as error:
+            print()
+            print(f"Not finalized: {error}")
+            raise SystemExit(1)
+        if decisions is not None and args.score:
+            parser.error("--score can't be combined with an adjusted review file; "
+                         "change total_instructor_score and run adjust-grades again.")
         for item in args.score or []:
             student_id, score = item.split("=", 1)
             approved_scores[student_id] = float(score)
@@ -1223,17 +1361,33 @@ def main():
             student_id, criterion_id = key.split(":", 1)
             overrides[(student_id, criterion_id)] = float(score)
 
-        output_path, csv_path, txt_paths, validation = finalize_grading(
-            args.project_path,
-            args.run,
-            approved_scores,
-            overrides,
-        )
+        try:
+            output_path, csv_path, txt_paths, validation = finalize_grading(
+                args.project_path,
+                args.run,
+                approved_scores,
+                overrides,
+                decisions,
+            )
+        except (ValueError, OSError, KeyError) as error:
+            print()
+            print(f"Not finalized: {error}")
+            raise SystemExit(1)
 
         print()
         print(f"Finalization written to: {output_path}")
         # File names below hold no student names; the folder's files do.
-        print(f"Instructor summary: {csv_path.name}")
+        print(f"Final grades and comments for Brightspace: {FINAL_CSV_FILENAME}")
+        if decisions is not None:
+            adjusted = sum(1 for sid, d in decisions.items()
+                           if abs(d["final_grade"] - approved_scores[sid]) > 1e-9)
+            by_hand = sum(1 for d in decisions.values() if d["grade_edited_by_hand"])
+            comments_by_hand = sum(1 for d in decisions.values() if d["comment_edited_by_hand"])
+            print(f"  Students with an adjusted grade: {adjusted} of {len(decisions)}")
+            if by_hand or comments_by_hand:
+                print(f"  Edited by hand in the review file: {by_hand} grade(s), "
+                      f"{comments_by_hand} comment(s)")
+        print(f"Instructor summary (itemized): {csv_path.name}")
         print(f"Student feedback files: {len(txt_paths)} (one per student)")
         print(f"Feedback for Brightspace: {FEEDBACK_CSV_FILENAME}, "
               f"{FEEDBACK_TEXT_FILENAME} (by last name)")

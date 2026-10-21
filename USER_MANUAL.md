@@ -41,6 +41,8 @@ AI-assisted grading
     ↓
 Instructor review
     ↓
+Final adjustments (curve, comments) in your words
+    ↓
 Finalize grades and feedback
 ```
 
@@ -722,7 +724,74 @@ AI-generated grades remain preliminary until the instructor or grader approves t
 
 # Part VI — Finalizing Grades
 
-## 23. Approve Final Scores
+## 23. Final Adjustments and Approval
+
+After reviewing the AI scores, describe the final adjustments in your own words: a curve, raising certain grades, words to put in certain comments. AI Grader turns them into a plan, applies it, and writes the **next review file** (`instructor_review_v002.csv`, then `v003`, and so on) with the adjusted grades and a short comment for every student. Repeat until the grades are what you want, then finalize from the last file.
+
+### Adjust grades in your words
+
+Where you disagree with an AI score, first enter your total in `total_instructor_score` in the latest review file and save it. Every other student starts from the AI score.
+
+Then give your instructions, in quotes or in a text file:
+
+```powershell
+python -m ai_grader adjust-grades ".\projects\PROJECT_ID" --run run_v001 `
+    --instructions "Curve the grades. The lowest grade should be at least 75 and the average at least 90. FIRSTNAME's grade should be at least 85. Students with 99 get 100 and 'very good' in the comment. Students with 100 get 'excellent!'."
+```
+
+For longer instructions, write them in a text file in the project folder and use `--instructions-file ".\projects\PROJECT_ID\adjustments.txt"`. For no adjustment at all, say so (`--instructions "No curve. Keep the grades."`): you still get the short comments and the final CSV.
+
+What AI Grader can do:
+
+| Kind | Examples |
+|---|---|
+| Curve to targets | lowest grade, average, median, or one student's grade "at least" a value. AI Grader finds the **smallest** curve that meets all of them. |
+| Curve by amount | "add 5 points to everyone"; "close 30% of each student's missing points"; an equation "new = 0.8 x old + 20" |
+| Raise grades | "99 becomes 100"; "95 to 98 become 98" (only raises) |
+| One student | "set Student_004 to 88 because ..." or "+3 for Student_004 because ..." (always with a reason) |
+| Comments | words at the start of the comment by grade ("Excellent!" for 100); text added to, or replacing, one student's comment |
+| Rounding | whole points (default), half points, or none; curved grades round up |
+
+The default curve gives every student the same share of the points they were missing, so a 68 gains more than a 95 and a 100 stays 100. "The same points for everyone" gives the add curve. Curves never lower a grade, never go above the maximum and never change the students' order. Because grades round up, two students one point apart can end with the same grade.
+
+Instructions AI Grader can't carry out (for example changing itemized scores, late penalties or extra credit above the maximum) are listed as **NOT applied**; nothing is guessed. Change itemized scores in the review instead.
+
+The command prints what it understood, the curve equation, the lowest, mean, median and highest grade before and after, whether each target is met, and every student's grade before and after, by anonymous ID only.
+
+**Student names.** You can name a student in the instructions. Names are replaced with anonymous IDs on your computer before anything is sent to the model. A name that matches several students (two students called Ana) is refused: use the full name or the Brightspace username. A misspelled name is read as the closest student and printed for you to check.
+
+### Check the new review file
+
+Open the new review file. Six columns come first:
+
+- `grade_before_adjustment` and `grade_source` (`instructor` if you entered the score, `ai` otherwise);
+- `adjusted_grade`, `adjustment` and `adjusted_by` (`curve`, `mapping`, `override` or `none`);
+- `final_comment`: the short comment students will see next to the grade.
+
+The short comments are written by the model from each student's itemized scores and feedback (one or two sentences), checked, and kept for later rounds, so they are written only once. A comment that fails the checks is replaced with one built from the task scores; `--template-comments` uses those for everyone without a model call.
+
+You can edit `adjusted_grade` or `final_comment` by hand and save the file. Your edits are kept in later rounds and reported at finalization.
+
+### Another round
+
+To change something, describe only the change; the earlier instructions still apply:
+
+```powershell
+python -m ai_grader adjust-grades ".\projects\PROJECT_ID" --run run_v001 --instructions "Make the average at least 91 instead."
+```
+
+This writes the next review file. Every round starts from the grades before adjustment, so curves never stack. `--restart` starts a new plan without the earlier instructions or hand edits. Earlier review files are never changed.
+
+### Finalize from the adjusted review
+
+```powershell
+python -m ai_grader finalize-grading ".\projects\PROJECT_ID" --run run_v001 `
+    --scores-file ".\projects\PROJECT_ID\grader\grading_runs\run_v001\instructor_review_v003.csv"
+```
+
+Finalizing from an adjusted review file is your approval of its grades and comments. AI Grader refuses if you changed `total_instructor_score` after the last round (run `adjust-grades` again so the curve uses it).
+
+### Finalize without the adjustment step
 
 Before finalization, determine the instructor-approved score for every anonymous student ID.
 
@@ -771,7 +840,8 @@ grader\finalizations\run_v###\finalization_v###\
 
 The finalization contains:
 
-- an instructor summary CSV;
+- `final_grades_for_brightspace.csv`: Username, Student, Final Grade, Out of, Comment, by last name. This is the file for Brightspace; it has no itemized scores;
+- an instructor summary CSV with the itemized scores, the approved total, the final adjustment, the final grade and comment;
 - one student-facing feedback TXT file per student;
 - `brightspace_feedback.csv` (Username, Student, Grade, Out of, Feedback) and `brightspace_feedback_to_paste.txt` (every student's feedback, by last name, for pasting into Brightspace);
 - `final_grades.json`, the private record the Brightspace export reads;
@@ -945,10 +1015,16 @@ python -m ai_grader generate-report PROJECT_PATH --run RUN_ID --open
 Create a named instructor review CSV with blank approval fields. `--run` defaults to the latest grading run.
 
 ```text
+python -m ai_grader adjust-grades PROJECT_PATH --run RUN_ID --instructions "..."
+```
+
+Apply final adjustments described in your words (`--instructions` or `--instructions-file`; advanced: `--plan-file`) and write the next `instructor_review_v###.csv` with adjusted grades and short comments. Later rounds revise earlier ones; `--restart` starts over; `--template-comments` writes comments without the model; `--from` picks the review file to start from.
+
+```text
 python -m ai_grader finalize-grading PROJECT_PATH --run RUN_ID --score Student_###=POINTS
 ```
 
-Create final instructor and student-facing reports from instructor-approved scores, including Brightspace feedback files. Add `--brightspace-template EXPORT.csv` to also write the Brightspace grades import CSV.
+Create final instructor and student-facing reports from instructor-approved scores (or from an adjusted review file via `--scores-file`), including `final_grades_for_brightspace.csv` and Brightspace feedback files. Add `--brightspace-template EXPORT.csv` to also write the Brightspace grades import CSV.
 
 ```text
 python -m ai_grader export-brightspace PROJECT_PATH --run RUN_ID --template EXPORT.csv
@@ -1124,6 +1200,8 @@ instructor-reviewed grading specification
 anonymized submissions
     ↓
 AI-assisted preliminary grading
+    ↓
+final adjustments and short comments
     ↓
 instructor-approved finalization
 ```

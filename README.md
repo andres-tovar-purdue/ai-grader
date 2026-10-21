@@ -156,7 +156,12 @@ versioned output beneath `grader/grading_runs/run_v###/`:
 The CSV leaves `total_instructor_score` blank. No final score or Brightspace update
 is performed automatically.
 
-After the instructor approves scores, `finalize-grading` writes the instructor
+After review, `adjust-grades` applies final adjustments the instructor describes
+in plain words (a curve solved for targets such as the lowest grade or the mean,
+raised grades, comment wording) and writes the next `instructor_review_v###.csv`
+with adjusted grades and short comments; rounds repeat until the instructor is
+satisfied. `finalize-grading` then writes `final_grades_for_brightspace.csv`
+(Username, Student, Final Grade, Out of, Comment), the instructor
 summary, per-student feedback, and Brightspace feedback files (CSV and one text
 file to paste from). `export-brightspace` (or `finalize-grading
 --brightspace-template`) fills a grades export downloaded from Brightspace into
