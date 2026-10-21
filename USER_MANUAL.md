@@ -720,6 +720,7 @@ python -m ai_grader generate-report ".\projects\PROJECT_ID" --run run_v001 --ope
 | `student_name`, `student_id` | who |
 | `total_agent_score` | the AI grade |
 | `total_instructor_score` | **your grade**, blank until you fill it |
+| `flag` | what needs your attention: notes the grader wrote for you (for example a PDF figure it could not read) and its review reasons; empty when there is nothing to check. These notes are never shown to students. |
 | `final_comment` | the short comment students will see next to the grade (one or two sentences on where points were lost and what to improve, or brief praise), written by the model from the itemized feedback; `--template-comments` builds it from the task scores without the model |
 
 The itemized task scores and feedback follow. Check that the AI used appropriate evidence, deductions correspond to the approved grading specification, missing evidence was handled appropriately, valid alternatives were accepted, the same error was not penalized twice, review flags were investigated, and the feedback is appropriate.
@@ -810,7 +811,7 @@ Finalizing from an adjusted review file is your approval of its grades and comme
 
 Each total must equal the sum of the student's task scores. If you entered a `total_instructor_score` that differs from the AI's task scores, either change the task scores (`--criterion-score Student_###:CRITERION_ID=POINTS`) or add `--accept-instructor-totals` to keep your total: the difference is recorded in the instructor summary (`instructor_total_adjustment`) and shown in the student's feedback as "Instructor adjustment to the task total", so the numbers still add up.
 
-Student feedback must not contain AI Grader's internal language, such as a note asking you to check something ("needs instructor review"). If it does, finalization stops and names each cell, for example `Student_009 task_2_feedback`. Edit that cell in the same review file, save it, and finalize again: task feedback you edit in the review file is used in the student's feedback and counted in the output.
+Notes the grader wrote for you inside the task feedback (such as "needs instructor review") never reach students: finalization removes them from the student feedback and keeps them in the `flag` column of the instructor summary, and lists the affected students by anonymous ID. Task feedback you edit in the review file is used in the student's feedback and counted in the output.
 
 ### Finalize without the adjustment step
 

@@ -274,6 +274,19 @@ class EngineTests(unittest.TestCase):
         with self.assertRaisesRegex(AdjustmentError, "matches 2 students"):
             anonymize_instructions("Ana should be 90.", students)
 
+    def test_instructor_notes_are_removed_clause_by_clause(self):
+        from ai_grader.student_language import remove_instructor_notes
+        self.assertEqual(remove_instructor_notes(
+            "The report covers limitations, but figures were not extracted; instructor "
+            "review is needed for the plot."), (
+            "The report covers limitations, but figures were not extracted.",
+            ["instructor review is needed for the plot."]))
+        self.assertEqual(remove_instructor_notes(
+            "Results are complete. The plot requires instructor review because figures "
+            "were not extracted."), ("Results are complete.", [
+                "The plot requires instructor review because figures were not extracted."]))
+        self.assertEqual(remove_instructor_notes("Good work."), ("Good work.", []))
+
     def test_comments(self):
         tasks = [{"title": "Beam Model", "score": 50, "max_points": 60},
                  {"title": "Written Report", "score": 30, "max_points": 40}]
@@ -321,7 +334,7 @@ class RoundTests(unittest.TestCase):
         rows = {row["student_id"]: row for row in read_rows(summary["path"])}
         self.assertEqual(list(read_rows(summary["path"])[0])[:8], [
             "student_name", "student_id", "total_agent_score", "total_instructor_score",
-            "adjusted_grade", "adjustment", "adjusted_by", "final_comment"])
+            "flag", "adjusted_grade", "adjustment", "adjusted_by"])
         self.assertEqual((rows["Student_001"]["total_agent_score"],
                           rows["Student_001"]["adjusted_grade"],
                           rows["Student_001"]["adjustment"]), ("68", "76", "+8"))
@@ -472,14 +485,15 @@ class RoundTests(unittest.TestCase):
         self.assertIn("Instructor adjustment to the task total: +4", text)
         self.assertIn("Grade before adjustment: 79/100", text)
 
-    def test_internal_notes_in_feedback_are_located_and_editable(self):
+    def test_instructor_notes_become_flags_not_student_feedback(self):
+        note = ("Report incomplete; the notebook could not be opened, so the plot "
+                "needs instructor review.")
         results_path = self.run_path / "grading_results.json"
         run = json.loads(results_path.read_text(encoding="utf-8"))
-        run["results"][8]["tasks"][1]["feedback"] = ("Report incomplete; the notebook "
-                                                     "could not be opened, needs instructor review.")
+        run["results"][8]["tasks"][1]["feedback"] = note
         results_path.write_text(json.dumps(run), encoding="utf-8")
         rows = read_rows(self.v001)             # The review file shows the same text.
-        rows[8]["task_2_feedback"] = run["results"][8]["tasks"][1]["feedback"]
+        rows[8]["task_2_feedback"] = note
         write_rows(self.v001, rows)
         plan_file = self.root / "plan.json"
         plan_file.write_text(json.dumps(target_plan()), encoding="utf-8")
@@ -488,25 +502,39 @@ class RoundTests(unittest.TestCase):
                                 "--template-comments"]), patch("sys.stdout", io.StringIO()):
             main()
         review = self.run_path / "instructor_review_v002.csv"
-        argv = ["ai_grader", "finalize-grading", str(self.root), "--run", "run_v001",
-                "--scores-file", str(review)]
+        flags = {row["student_id"]: row["flag"] for row in read_rows(review)}
+        self.assertEqual(flags["Student_009"], "Task 2: the plot needs instructor review.")
+        self.assertEqual(flags["Student_001"], "")
         output = io.StringIO()
-        with patch("sys.argv", argv), patch("sys.stdout", output), \
-             self.assertRaises(SystemExit):
-            main()
-        self.assertIn("Student_009 task_2_feedback ('instructor review')", output.getvalue())
-        rows = read_rows(review)
+        with patch("sys.argv", ["ai_grader", "finalize-grading", str(self.root), "--run",
+                                "run_v001", "--scores-file", str(review)]), \
+             patch("sys.stdout", output):
+            main()                                # Not blocked.
+        self.assertIn("Notes meant for you were left out of the student feedback for 1 "
+                      "student(s) (Student_009)", output.getvalue())
+        folder = next((self.root / "grader" / "finalizations" / "run_v001").iterdir())
+        text = next(folder.glob("Jules*_feedback.txt")).read_text(encoding="utf-8")
+        self.assertIn("Report incomplete; the notebook could not be opened.\n", text)
+        self.assertNotIn("instructor review", text)
+        summary = next(r for r in read_rows(next(folder.glob("*_instructor_summary.csv")))
+                       if r["anonymous_student_id"] == "Student_009")
+        self.assertEqual(summary["flag"], "Written Report: the plot needs instructor review.")
+
+    def test_task_feedback_edited_in_the_review_file_is_used(self):
+        rows = read_rows(self.v001)
         for row in rows:
-            if row["student_id"] == "Student_009":
-                row["task_2_feedback"] = "Report incomplete; the notebook could not be opened."
-        write_rows(review, rows)
+            row["total_instructor_score"] = row["total_agent_score"]
+        rows[8]["task_2_feedback"] = "Rewritten for the student."
+        write_rows(self.v001, rows)
         output = io.StringIO()
-        with patch("sys.argv", argv), patch("sys.stdout", output):
+        with patch("sys.argv", ["ai_grader", "finalize-grading", str(self.root), "--run",
+                                "run_v001", "--scores-file", str(self.v001)]), \
+             patch("sys.stdout", output):
             main()
         self.assertIn("Task feedback you edited in the review file: 1", output.getvalue())
         folder = next((self.root / "grader" / "finalizations" / "run_v001").iterdir())
         text = next(folder.glob("Jules*_feedback.txt")).read_text(encoding="utf-8")
-        self.assertIn("Report incomplete; the notebook could not be opened.\n", text)
+        self.assertIn("Rewritten for the student.\n", text)
 
     def test_cli_round_and_finalize_without_names(self):
         plan_file = self.root / "plan.json"
@@ -561,8 +589,8 @@ class RoundTests(unittest.TestCase):
 
     def test_finalize_directly_from_a_filled_review_file(self):
         rows = read_rows(self.v001)
-        self.assertEqual(list(rows[0])[:5], ["student_name", "student_id", "total_agent_score",
-                                             "total_instructor_score", "final_comment"])
+        self.assertEqual(list(rows[0])[:6], ["student_name", "student_id", "total_agent_score",
+                                             "total_instructor_score", "flag", "final_comment"])
         for row in rows:
             row["total_instructor_score"] = row["total_agent_score"]
             if row["student_id"] == "Student_002":

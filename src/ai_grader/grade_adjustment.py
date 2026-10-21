@@ -36,7 +36,7 @@ from ai_grader.adjustments import (
     plan_schema, upgrade_plan, validate_plan,
 )
 from ai_grader.ai_client import get_client, resolve_model
-from ai_grader.student_language import internal_terms
+from ai_grader.student_language import internal_terms, remove_instructor_notes
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -92,8 +92,28 @@ def review_fieldnames(fields, adjusted):
     """
     lead = [name for name in GRADE_COLUMNS if name in fields or name == "student_name"]
     middle = ["adjusted_grade", "adjustment", "adjusted_by"] if adjusted else []
-    skip = set(lead) | set(ADJUSTMENT_COLUMNS) | set(LEGACY_COLUMNS) | set(HIDDEN_COLUMNS)
-    return lead + middle + ["final_comment"] + [name for name in fields if name not in skip]
+    skip = (set(lead) | set(ADJUSTMENT_COLUMNS) | set(LEGACY_COLUMNS) | set(HIDDEN_COLUMNS)
+            | {"flag"})
+    return (lead + ["flag"] + middle + ["final_comment"]
+            + [name for name in fields if name not in skip])
+
+
+def review_flag(row):
+    """
+    What needs your attention for one student: notes the grader wrote for you
+    inside the task feedback (they are removed from what students see) and
+    the grader's review reasons. Empty when there is nothing to check.
+    """
+    notes = []
+    number = 1
+    while f"task_{number}_feedback" in row:
+        _, removed = remove_instructor_notes(row.get(f"task_{number}_feedback") or "")
+        notes.extend(f"Task {number}: {note}" for note in removed)
+        number += 1
+    if str(row.get("review_required", "")).strip().casefold() == "true":
+        reasons = (row.get("review_reasons") or "").strip()
+        notes.append(reasons or "The grader asked for a review.")
+    return " | ".join(notes)
 
 
 def sidecar_path(review_path):
@@ -275,7 +295,7 @@ def comment_inputs(run, spec):
         tasks = [{"title": titles.get(task["task_id"], task.get("title", task["task_id"])),
                   "score": task.get("agent_score"),
                   "max_points": task["max_points"],
-                  "feedback": task.get("feedback", "")}
+                  "feedback": remove_instructor_notes(task.get("feedback", ""))[0]}
                  for task in result.get("tasks", [])]
         inputs[result["student_id"]] = tasks
     return inputs
@@ -479,6 +499,7 @@ def adjust_grades(project_path, run_version, instructions=None, plan=None,
         new_row = {key: value for key, value in row.items()
                    if key not in ADJUSTMENT_COLUMNS and key not in LEGACY_COLUMNS}
         new_row.update({
+            "flag": review_flag(row),
             "adjusted_grade": f"{student['adjusted_grade']:g}",
             "adjustment": f"{student['change']:+g}",
             "adjusted_by": student["set_by"],

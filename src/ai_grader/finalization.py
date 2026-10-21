@@ -9,7 +9,7 @@ from ai_grader.grade_adjustment import template_comment
 from ai_grader.spec_validation import validate_spec_data, load_json
 from ai_grader.submission_checks import spec_fingerprint
 from ai_grader.rounding import apply_rounding
-from ai_grader.student_language import internal_terms
+from ai_grader.student_language import internal_terms, remove_instructor_notes
 
 
 def load_approved_scores(csv_path):
@@ -229,6 +229,16 @@ def finalize_grading(
         adjustment = round(final_grade - approved_total, 6)
 
         overall = _overall_feedback(tasks)
+        # Notes meant for the instructor ("needs instructor review") never reach
+        # the student: they are removed here and kept as a flag for the instructor.
+        flags = []
+        for task in tasks:
+            task["feedback"], removed = remove_instructor_notes(task["feedback"])
+            flags.extend(f"{task['title']}: {note}" for note in removed)
+        final_comment, removed = remove_instructor_notes(final_comment)
+        flags.extend(f"Comment: {note}" for note in removed)
+        if not final_comment:
+            final_comment = template_comment(tasks)
         found = [(f"task_{number}_feedback", internal_terms(task["feedback"]))
                  for number, task in enumerate(tasks, start=1)]
         found += [("final_comment", internal_terms(final_comment))]
@@ -291,6 +301,7 @@ def finalize_grading(
             "final_grade": final_grade,
             "final_grade_edited_by_hand": str(edited).lower(),
             "final_comment": final_comment,
+            "flag": " | ".join(flags),
         }
         for index, task in enumerate(tasks, start=1):
             row[f"task_{index}_score"] = task["score"]
@@ -324,6 +335,7 @@ def finalize_grading(
         "final_grade",
         "final_grade_edited_by_hand",
         "final_comment",
+        "flag",
     ]
     with csv_path.open("w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)

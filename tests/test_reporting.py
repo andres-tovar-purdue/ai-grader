@@ -137,8 +137,8 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("--scores-file", output.getvalue())
             self.assertIn("AI grades stay preliminary until you finalize", output.getvalue())
             header = report.read_text(encoding="utf-8-sig").splitlines()[0].split(",")
-            self.assertEqual(header[:5], ["student_name", "student_id", "total_agent_score",
-                                          "total_instructor_score", "final_comment"])
+            self.assertEqual(header[:6], ["student_name", "student_id", "total_agent_score",
+                                          "total_instructor_score", "flag", "final_comment"])
 
     def test_windows_opens_with_default_application(self):
         with patch("ai_grader.reporting.sys.platform", "win32"), \

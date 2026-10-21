@@ -1484,8 +1484,14 @@ def main():
                 print(f"  Edited by hand in the review file: {by_hand} grade(s), "
                       f"{comments_by_hand} comment(s)")
         with csv_path.open(encoding="utf-8", newline="") as stream:
-            changed_totals = sum(1 for row in csv.DictReader(stream)
-                                 if abs(float(row["instructor_total_adjustment"] or 0)) > 1e-9)
+            summary_rows = list(csv.DictReader(stream))
+        changed_totals = sum(1 for row in summary_rows
+                             if abs(float(row["instructor_total_adjustment"] or 0)) > 1e-9)
+        flagged = [row["anonymous_student_id"] for row in summary_rows if row.get("flag")]
+        if flagged:
+            print(f"  Notes meant for you were left out of the student feedback for "
+                  f"{len(flagged)} student(s) ({', '.join(sorted(flagged))}); they are in "
+                  "the flag column of the instructor summary.")
         edited_feedback = sum(len(items) for items in feedback_edits.values())
         if edited_feedback:
             print(f"  Task feedback you edited in the review file: {edited_feedback}")

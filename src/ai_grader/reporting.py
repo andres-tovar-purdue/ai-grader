@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 
-from ai_grader.grade_adjustment import comments_for_run, review_fieldnames
+from ai_grader.grade_adjustment import comments_for_run, review_fieldnames, review_flag
 
 
 def generate_review_report(project_path, run_version=None, use_model_comments=False,
@@ -65,6 +65,7 @@ def generate_review_report(project_path, run_version=None, use_model_comments=Fa
                                            use_model_comments)
     for row in rows:
         row["final_comment"] = comments.get(row["student_id"], ("", "template"))[0]
+        row["flag"] = review_flag(row)
     if comment_stats is not None:
         comment_stats.update({
             "ai": sum(1 for _, source in comments.values() if source == "ai"),
