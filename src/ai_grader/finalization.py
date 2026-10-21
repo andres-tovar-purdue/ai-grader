@@ -219,7 +219,8 @@ def finalize_grading(
 
         if decisions is not None:
             final_grade = float(decisions[student_id]["final_grade"])
-            final_comment = decisions[student_id]["comment"]
+            final_comment = (decisions[student_id]["comment"]
+                             or template_comment(tasks))
             edited = decisions[student_id].get("grade_edited_by_hand", False)
         else:
             final_grade, final_comment, edited = approved_total, template_comment(tasks), False

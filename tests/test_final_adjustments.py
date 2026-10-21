@@ -320,10 +320,11 @@ class RoundTests(unittest.TestCase):
         self.assertIsNone(request["previous_plan"])
         rows = {row["student_id"]: row for row in read_rows(summary["path"])}
         self.assertEqual(list(read_rows(summary["path"])[0])[:8], [
-            "student_name", "student_id", "grade_before_adjustment", "grade_source",
+            "student_name", "student_id", "total_agent_score", "total_instructor_score",
             "adjusted_grade", "adjustment", "adjusted_by", "final_comment"])
-        self.assertEqual((rows["Student_001"]["adjusted_grade"], rows["Student_001"]["adjustment"],
-                          rows["Student_001"]["grade_source"]), ("76", "+8", "ai"))
+        self.assertEqual((rows["Student_001"]["total_agent_score"],
+                          rows["Student_001"]["adjusted_grade"],
+                          rows["Student_001"]["adjustment"]), ("68", "76", "+8"))
         self.assertEqual(rows[DANA]["adjusted_grade"], "85")
         self.assertTrue(rows["Student_011"]["final_comment"].startswith("Excellent! You did"))
         self.assertTrue(rows["Student_010"]["final_comment"].startswith("Very good work! "))
@@ -366,8 +367,12 @@ class RoundTests(unittest.TestCase):
         self.assertEqual((rows["Student_005"]["adjusted_grade"],
                           rows["Student_005"]["adjusted_by"]), ("92", "override"))
         self.assertEqual(rows["Student_006"]["final_comment"], "Great teamwork on the report.")
-        self.assertEqual((rows["Student_002"]["grade_before_adjustment"],
-                          rows["Student_002"]["grade_source"]), ("78", "instructor"))
+        self.assertEqual((rows["Student_002"]["total_agent_score"],
+                          rows["Student_002"]["total_instructor_score"]), ("75", "78"))
+        record = json.loads(sidecar_path(second["path"]).read_text(encoding="utf-8"))
+        written = {item["student_id"]: item for item in record["written"]}
+        self.assertEqual((written["Student_002"]["grade_before_adjustment"],
+                          written["Student_002"]["grade_source"]), (78, "instructor"))
         self.assertGreaterEqual(second["after"]["mean"], 91)
         self.assertEqual(second["hand_edits"], {"grades": ["Student_005"],
                                                 "comments": ["Student_006"]})
@@ -416,10 +421,10 @@ class RoundTests(unittest.TestCase):
         self.assertTrue(validation["csv_txt_grades_agree"])
         final = {row["Username"]: row for row in read_rows(output / FINAL_CSV_FILENAME)}
         self.assertEqual(list(read_rows(output / FINAL_CSV_FILENAME)[0]),
-                         ["Student", "Username", "Final Grade", "Comment"])
-        self.assertEqual(final["user01"]["Student"], "Avery SampleA")
-        self.assertEqual((final["user01"]["Final Grade"], final["user03"]["Final Grade"],
-                          final["user10"]["Final Grade"]), ("76", "85", "100"))
+                         ["Student Name", "Username", "Grade", "Comment"])
+        self.assertEqual(final["user01"]["Student Name"], "Avery SampleA")
+        self.assertEqual((final["user01"]["Grade"], final["user03"]["Grade"],
+                          final["user10"]["Grade"]), ("76", "85", "100"))
         self.assertEqual(final["user04"]["Comment"], "Solid model; tighten the report.")
         self.assertTrue(final["user11"]["Comment"].startswith("Excellent!"))
         summary_rows = {r["anonymous_student_id"]: r for r in read_rows(csv_path)}
@@ -524,7 +529,9 @@ class RoundTests(unittest.TestCase):
             main()
         text += output.getvalue()
         self.assertIn(FINAL_CSV_FILENAME, output.getvalue())
-        self.assertIn("Students with an adjusted grade: 10 of 11", output.getvalue())
+        self.assertIn("Students with an adjusted grade (curve or other adjustment): 10 of 11",
+                      output.getvalue())
+        self.assertIn("Your grade differs from the AI grade for 0 of 11", output.getvalue())
         for name in FIRST + ["Sample", "user01"]:
             self.assertNotIn(name, text)
 
@@ -539,7 +546,46 @@ class RoundTests(unittest.TestCase):
                                 "run_v001", "--scores-file", str(self.v001)]), \
              patch("sys.stdout", output), self.assertRaises(SystemExit):
             main()
-        self.assertIn("Not finalized: Instructor score is blank for Student_001", output.getvalue())
+        self.assertIn("total_instructor_score is blank for 11 student(s) (Student_001,",
+                      output.getvalue())
+
+    def test_review_file_comments_written_by_the_model(self):
+        model = FakeModel(comment=lambda sid: "You built a sound model; explain the report.")
+        stats = {}
+        path = generate_review_report(self.root, "run_v001", use_model_comments=True,
+                                      client=model, model="test-model", comment_stats=stats)
+        self.assertEqual(stats["ai"], 11)
+        self.assertEqual({row["final_comment"] for row in read_rows(path)},
+                         {"You built a sound model; explain the report."})
+        self.assertNotIn("Sample", json.dumps(model.calls))
+
+    def test_finalize_directly_from_a_filled_review_file(self):
+        rows = read_rows(self.v001)
+        self.assertEqual(list(rows[0])[:5], ["student_name", "student_id", "total_agent_score",
+                                             "total_instructor_score", "final_comment"])
+        for row in rows:
+            row["total_instructor_score"] = row["total_agent_score"]
+            if row["student_id"] == "Student_002":
+                row["total_instructor_score"] = "79"            # A correction (AI 75).
+            if row["student_id"] == "Student_004":
+                row["final_comment"] = "Clear model; cite your sources."
+        write_rows(self.v001, rows)
+        output = io.StringIO()
+        with patch("sys.argv", ["ai_grader", "finalize-grading", str(self.root), "--run",
+                                "run_v001", "--scores-file", str(self.v001)]), \
+             patch("sys.stdout", output):
+            main()
+        text = output.getvalue()
+        self.assertIn("Your grade differs from the AI grade for 1 of 11 student(s):", text)
+        self.assertIn("Student_002: AI 75 -> yours 79 (+4)", text)
+        self.assertNotIn("adjusted grade", text)
+        folder = next((self.root / "grader" / "finalizations" / "run_v001").iterdir())
+        final = {row["Username"]: row for row in read_rows(folder / FINAL_CSV_FILENAME)}
+        self.assertEqual(list(next(iter(final.values()))),
+                         ["Student Name", "Username", "Grade", "Comment"])
+        self.assertEqual((final["user02"]["Grade"], final["user01"]["Grade"]), ("79", "68"))
+        self.assertEqual(final["user04"]["Comment"], "Clear model; cite your sources.")
+        self.assertTrue(final["user01"]["Comment"].startswith("Your strongest work was in"))
 
 
     def test_cli_explains_api_refusals(self):

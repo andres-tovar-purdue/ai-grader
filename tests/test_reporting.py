@@ -124,7 +124,10 @@ class ReportingTests(unittest.TestCase):
             root = Path(directory).resolve()
             self.prepare(root)
             output = io.StringIO()
-            with patch("sys.argv", ["ai_grader", "generate-report", str(root), "--run", "run_v004", "--open"]), \
+            with patch("sys.argv", ["ai_grader", "generate-report", str(root), "--run", "run_v004",
+                                    "--open", "--template-comments"]), \
+                 patch("ai_grader.grade_adjustment.get_client",
+                       side_effect=AssertionError("No API calls")), \
                  patch("sys.stdout", output), patch("ai_grader.cli.open_report") as opener, \
                  patch("ai_grader.grading.get_client", side_effect=AssertionError("No API calls")), \
                  patch("ai_grader.cli.finalize_grading", side_effect=AssertionError("No finalization")):
@@ -132,7 +135,10 @@ class ReportingTests(unittest.TestCase):
             report = root / "grader/grading_runs/run_v004/instructor_review_v001.csv"
             opener.assert_called_once_with(report)
             self.assertIn("--scores-file", output.getvalue())
-            self.assertIn("Final scores remain unapproved", output.getvalue())
+            self.assertIn("AI grades stay preliminary until you finalize", output.getvalue())
+            header = report.read_text(encoding="utf-8-sig").splitlines()[0].split(",")
+            self.assertEqual(header[:5], ["student_name", "student_id", "total_agent_score",
+                                          "total_instructor_score", "final_comment"])
 
     def test_windows_opens_with_default_application(self):
         with patch("ai_grader.reporting.sys.platform", "win32"), \

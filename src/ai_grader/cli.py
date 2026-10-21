@@ -14,7 +14,7 @@ from ai_grader.brightspace import (
     export_brightspace,
 )
 from ai_grader.adjustments import AdjustmentError
-from ai_grader.grade_adjustment import adjust_grades, adjusted_review_decisions
+from ai_grader.grade_adjustment import adjust_grades, review_decisions
 from ai_grader.finalization import (
     feedback_edits_from_review, finalize_grading, load_approved_scores,
 )
@@ -483,6 +483,10 @@ def main():
     )
     report_parser.add_argument("project_path", help="Path to the project folder.")
     report_parser.add_argument("--run", help="Run version; defaults to the latest grading run.")
+    report_parser.add_argument(
+        "--template-comments", action="store_true",
+        help="Write the short comments from the task scores without the model.")
+    report_parser.add_argument("--model", help="Model for the comments. Default: OPENAI_MODEL.")
     report_parser.add_argument("--open", action="store_true",
                                help="Open the report in the default spreadsheet application.")
 
@@ -521,9 +525,7 @@ def main():
     finalize_parser.add_argument(
         "--accept-instructor-totals",
         action="store_true",
-        help=("Keep an approved total that differs from the sum of the task scores; "
-              "the difference is recorded and shown as an instructor adjustment to "
-              "the task total."),
+        help=argparse.SUPPRESS,     # Now the default; kept so older commands still work.
     )
     finalize_parser.add_argument(
         "--brightspace-template",
@@ -1323,28 +1325,44 @@ def main():
         )
 
     elif args.command == "generate-report":
+        stats = {}
         try:
-            report_path = generate_review_report(args.project_path, args.run)
-        except (ValueError, OSError, KeyError) as error:
-            parser.error(str(error))
-        print(f"Named instructor review report: {report_path}")
-        print("Review the AI scores. Where you disagree, enter your total in "
-              "total_instructor_score and save the CSV.")
-        print("Final scores remain unapproved until you complete the review.")
+            if not args.template_comments:
+                print(describe_model(args.model))
+            report_path = generate_review_report(
+                args.project_path, args.run, use_model_comments=not args.template_comments,
+                model=args.model, comment_stats=stats)
+        except (ValueError, OSError, KeyError, RuntimeError) as error:
+            print()
+            print(f"No review file written: {error}")
+            raise SystemExit(1)
+        except Exception as error:
+            if not is_api_error(error):
+                raise
+            print()
+            print("No review file written: the OpenAI API refused the request "
+                  f"({describe_api_error(error)}). Use --template-comments to write the "
+                  "comments from the task scores instead.")
+            raise SystemExit(1)
+        print(f"Review file: {report_path}")
+        print(f"Short comments: {stats.get('ai', 0)} written by the model, "
+              f"{stats.get('template', 0)} from the task scores")
         print()
-        print("Next, describe any final adjustments (a curve, raised grades, comment "
-              "wording) in your words; AI Grader writes the next review file with "
-              "adjusted grades and short comments. For no adjustment, say so:")
+        print("In the file, total_agent_score is the AI grade. Enter your grade in "
+              "total_instructor_score for every student (copy the AI grade where you "
+              "agree) and check final_comment. Save as CSV UTF-8. AI grades stay "
+              "preliminary until you finalize.")
+        print("Then create the final CSV (Student Name, Username, Grade, Comment):")
         print_next_command(
-            f'python -m ai_grader adjust-grades "{args.project_path}" '
-            f'--run {report_path.parent.name} --instructions "No curve. Keep the grades."'
-        )
+            f'python -m ai_grader finalize-grading "{args.project_path}" '
+            f'--run {report_path.parent.name} --scores-file "{report_path}"')
         print()
-        print("Or, if you entered every student's total_instructor_score yourself, "
-              "finalize directly:")
+        print("Optional, before finalizing: a curve or other adjustment in your words, "
+              "for example:")
         print()
-        print(f'python -m ai_grader finalize-grading "{args.project_path}" '
-              f'--run {report_path.parent.name} --scores-file "{report_path}"')
+        print(f'python -m ai_grader adjust-grades "{args.project_path}" '
+              f'--run {report_path.parent.name} --instructions "Curve so the average is '
+              'at least 90."')
         if args.open:
             try:
                 open_report(report_path)
@@ -1396,7 +1414,7 @@ def main():
         decisions = None
         try:
             if args.scores_file:
-                approved_scores, decisions = adjusted_review_decisions(args.scores_file)
+                approved_scores, decisions = review_decisions(args.scores_file)
                 if approved_scores is None:
                     approved_scores = load_approved_scores(args.scores_file)
             else:
@@ -1433,7 +1451,7 @@ def main():
                 approved_scores,
                 overrides,
                 decisions,
-                args.accept_instructor_totals,
+                True,       # Your total is kept; a difference from the tasks is recorded.
                 feedback_edits,
             )
         except (ValueError, OSError, KeyError) as error:
@@ -1444,13 +1462,24 @@ def main():
         print()
         print(f"Finalization written to: {output_path}")
         # File names below hold no student names; the folder's files do.
-        print(f"Final grades and comments for Brightspace: {FINAL_CSV_FILENAME}")
+        print(f"Final CSV for Brightspace (Student Name, Username, Grade, Comment): "
+              f"{FINAL_CSV_FILENAME}")
         if decisions is not None:
+            differ = [(sid, d["ai_grade"], approved_scores[sid])
+                      for sid, d in sorted(decisions.items())
+                      if d.get("ai_grade") is not None
+                      and abs(d["ai_grade"] - approved_scores[sid]) > 1e-9]
+            print(f"  Your grade differs from the AI grade for {len(differ)} of "
+                  f"{len(decisions)} student(s)" + (":" if differ else "."))
+            for sid, ai_grade, yours in differ:
+                print(f"    {sid}: AI {ai_grade:g} -> yours {yours:g} ({yours - ai_grade:+g})")
             adjusted = sum(1 for sid, d in decisions.items()
                            if abs(d["final_grade"] - approved_scores[sid]) > 1e-9)
             by_hand = sum(1 for d in decisions.values() if d["grade_edited_by_hand"])
             comments_by_hand = sum(1 for d in decisions.values() if d["comment_edited_by_hand"])
-            print(f"  Students with an adjusted grade: {adjusted} of {len(decisions)}")
+            if adjusted:
+                print(f"  Students with an adjusted grade (curve or other adjustment): "
+                      f"{adjusted} of {len(decisions)}")
             if by_hand or comments_by_hand:
                 print(f"  Edited by hand in the review file: {by_hand} grade(s), "
                       f"{comments_by_hand} comment(s)")
@@ -1461,8 +1490,7 @@ def main():
         if edited_feedback:
             print(f"  Task feedback you edited in the review file: {edited_feedback}")
         if changed_totals:
-            print(f"  Your totals that differ from the task scores (kept as instructor "
-                  f"adjustments): {changed_totals}")
+            print(f"  Recorded as instructor adjustments to the task totals: {changed_totals}")
         print(f"Instructor summary (itemized): {csv_path.name}")
         print(f"Student feedback files: {len(txt_paths)} (one per student)")
         print(f"Feedback for Brightspace: {FEEDBACK_CSV_FILENAME}, "

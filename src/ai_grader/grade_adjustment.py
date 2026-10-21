@@ -44,8 +44,12 @@ INTERPRETATION_PROMPT = REPOSITORY / "prompts" / "grade_adjustment_instructions.
 COMMENT_PROMPT = REPOSITORY / "prompts" / "short_comment_instructions.md"
 COMMENT_CACHE_FILENAME = "short_comments.json"
 REVIEW_PATTERN = re.compile(r"instructor_review_v([0-9]{3})\.csv")
-ADJUSTMENT_COLUMNS = ["grade_before_adjustment", "grade_source", "adjusted_grade",
-                      "adjustment", "adjusted_by", "final_comment"]
+ADJUSTMENT_COLUMNS = ["adjusted_grade", "adjustment", "adjusted_by", "final_comment"]
+# Written by earlier versions; dropped from new review files (kept in the record).
+LEGACY_COLUMNS = ("grade_before_adjustment", "grade_source")
+# Rounding detail stays in preliminary_grading_report.csv and grading_results.json.
+HIDDEN_COLUMNS = ("raw_total_before_rounding", "total_rounding_adjustment")
+GRADE_COLUMNS = ["student_name", "student_id", "total_agent_score", "total_instructor_score"]
 REQUIRED_REVIEW_COLUMNS = {"student_id", "total_agent_score", "total_instructor_score"}
 COMMENT_BATCH = 10
 COMMENT_MAX_WORDS = 60
@@ -79,6 +83,17 @@ def review_versions(run_path):
         if match:
             found.append((int(match.group(1)), path))
     return [path for _, path in sorted(found)]
+
+
+def review_fieldnames(fields, adjusted):
+    """
+    Review file column order: who, the AI grade, your grade, the adjusted
+    grade (after an adjustment round), the comment, then the details.
+    """
+    lead = [name for name in GRADE_COLUMNS if name in fields or name == "student_name"]
+    middle = ["adjusted_grade", "adjustment", "adjusted_by"] if adjusted else []
+    skip = set(lead) | set(ADJUSTMENT_COLUMNS) | set(LEGACY_COLUMNS) | set(HIDDEN_COLUMNS)
+    return lead + middle + ["final_comment"] + [name for name in fields if name not in skip]
 
 
 def sidecar_path(review_path):
@@ -461,10 +476,9 @@ def adjust_grades(project_path, run_version, instructions=None, plan=None,
         student = by_id[row["student_id"]]
         comment = compose_comment(comments[row["student_id"]][0], student["opener"],
                                   student["student_comments"])
-        new_row = {key: value for key, value in row.items() if key not in ADJUSTMENT_COLUMNS}
+        new_row = {key: value for key, value in row.items()
+                   if key not in ADJUSTMENT_COLUMNS and key not in LEGACY_COLUMNS}
         new_row.update({
-            "grade_before_adjustment": f"{student['grade_before_adjustment']:g}",
-            "grade_source": base[row["student_id"]][1],
             "adjusted_grade": f"{student['adjusted_grade']:g}",
             "adjustment": f"{student['change']:+g}",
             "adjusted_by": student["set_by"],
@@ -473,15 +487,13 @@ def adjust_grades(project_path, run_version, instructions=None, plan=None,
         out_rows.append(new_row)
         written.append({"student_id": row["student_id"],
                         "grade_before_adjustment": student["grade_before_adjustment"],
+                        "grade_source": base[row["student_id"]][1],
                         "adjusted_grade": student["adjusted_grade"],
                         "final_comment": comment,
                         "comment_source": comments[row["student_id"]][1]})
 
-    leading = [name for name in ("student_name", "student_id") if name in fields]
-    rest = [name for name in fields if name not in leading and name not in ADJUSTMENT_COLUMNS
-            and name not in ("raw_total_before_rounding", "total_rounding_adjustment")]
     with output.open("x", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=leading + ADJUSTMENT_COLUMNS + rest,
+        writer = csv.DictWriter(stream, fieldnames=review_fieldnames(fields, adjusted=True),
                                 extrasaction="ignore")
         writer.writeheader()
         writer.writerows(out_rows)
@@ -525,12 +537,22 @@ def adjust_grades(project_path, run_version, instructions=None, plan=None,
     }
 
 
-def adjusted_review_decisions(review_path, maximum=None):
+def review_decisions(review_path, maximum=None):
     """
-    For finalization: from an adjusted review file, the approved grades
-    before adjustment and the final grade and comment for each student.
-    Returns (approved_scores, decisions) or (None, None) for a review file
-    that was never adjusted. Hand edits are allowed and reported.
+    For finalization from a review file. Returns (approved_scores,
+    decisions), or (None, None) for a plain scores CSV that is not a review
+    file (student_id and total_instructor_score only).
+
+    - A review file without an adjustment round: every student needs
+      total_instructor_score (your grade; copy total_agent_score where you
+      agree); that is the final grade, and final_comment (if present and
+      filled) is the comment.
+    - An adjusted review file: adjusted_grade is the final grade and
+      final_comment the comment; total_instructor_score must not have
+      changed since the round. Hand edits are allowed and reported.
+
+    decisions[student_id]: final_grade, comment (None = build from the task
+    scores), ai_grade, grade_edited_by_hand, comment_edited_by_hand.
     """
     review_path = Path(review_path)
     if not review_path.is_file():
@@ -538,20 +560,38 @@ def adjusted_review_decisions(review_path, maximum=None):
                               "workspace folder (the one that contains projects\\).")
     with review_path.open(encoding="utf-8-sig", newline="") as stream:
         header = next(csv.reader(stream), [])
-    if not set(ADJUSTMENT_COLUMNS) <= set(header):
+    if "total_agent_score" not in header:
         return None, None
     fields, rows = read_review(review_path)
-    record_path = sidecar_path(review_path)
+    adjusted = "adjusted_grade" in fields
     written = {}
-    if record_path.is_file():
+    record_path = sidecar_path(review_path)
+    if adjusted and record_path.is_file():
         written = {item["student_id"]: item for item in
                    json.loads(record_path.read_text(encoding="utf-8"))["written"]}
-    approved, decisions, problems = {}, {}, []
+    approved, decisions, problems, blank = {}, {}, [], []
     for row in rows:
         student_id = row["student_id"]
-        recorded = _number(row["grade_before_adjustment"])
+        ai_grade = _number(row.get("total_agent_score"))
         instructor = _number(row.get("total_instructor_score"))
-        current = instructor if instructor is not None else _number(row.get("total_agent_score"))
+        comment = (row.get("final_comment") or "").strip() or None
+        if instructor is not None and (not math.isfinite(instructor) or instructor < 0
+                                       or (maximum is not None and instructor > maximum + 1e-9)):
+            problems.append(f"{student_id}: total_instructor_score is not a valid grade")
+            continue
+        if not adjusted:
+            if instructor is None:
+                blank.append(student_id)
+                continue
+            approved[student_id] = instructor
+            decisions[student_id] = {"final_grade": instructor, "comment": comment,
+                                     "ai_grade": ai_grade, "grade_edited_by_hand": False,
+                                     "comment_edited_by_hand": False}
+            continue
+        before = written.get(student_id)
+        recorded = (before["grade_before_adjustment"] if before
+                    else _number(row.get("grade_before_adjustment")))
+        current = instructor if instructor is not None else ai_grade
         if recorded is None or current is None or not math.isfinite(current) \
                 or abs(recorded - current) > 1e-9:
             problems.append(f"{student_id}: total_instructor_score changed after the "
@@ -562,19 +602,41 @@ def adjusted_review_decisions(review_path, maximum=None):
                 (maximum is not None and final > maximum + 1e-9):
             problems.append(f"{student_id}: adjusted_grade is missing or out of range")
             continue
-        comment = (row.get("final_comment") or "").strip()
-        if not comment:
+        if comment is None:
             problems.append(f"{student_id}: final_comment is empty")
             continue
-        before = written.get(student_id)
         approved[student_id] = recorded
         decisions[student_id] = {
             "final_grade": final,
             "comment": comment,
+            "ai_grade": ai_grade,
             "grade_edited_by_hand": bool(before and abs(before["adjusted_grade"] - final) > 1e-9),
             "comment_edited_by_hand": bool(before and before["final_comment"].strip() != comment),
         }
+    if blank:
+        problems.insert(0, f"total_instructor_score is blank for {len(blank)} student(s) "
+                           f"({', '.join(blank)}); enter your grade, or copy total_agent_score "
+                           "where you agree with the AI")
     if problems:
-        raise AdjustmentError("Can't finalize from " + Path(review_path).name + ": "
+        raise AdjustmentError("Can't finalize from " + review_path.name + ": "
                               + "; ".join(problems) + ".")
     return approved, decisions
+
+
+def adjusted_review_decisions(review_path, maximum=None):
+    """Earlier name of review_decisions."""
+    return review_decisions(review_path, maximum)
+
+
+def comments_for_run(project_path, run_version, client=None, model=None, use_model=False):
+    """Short comments for every student of a run: ({id: (text, source)}, fallback reasons)."""
+    grader = Path(project_path).resolve() / "grader"
+    run_path = grader / "grading_runs" / run_version
+    run = json.loads((run_path / "grading_results.json").read_text(encoding="utf-8-sig"))
+    try:
+        spec = _load_spec(grader, run_path, run)
+    except (OSError, ValueError):
+        spec = {"tasks": []}             # Task titles then come from the run itself.
+    comments, _, fallbacks = short_comments(run_path, comment_inputs(run, spec), client,
+                                            resolve_model(model), use_model)
+    return comments, fallbacks

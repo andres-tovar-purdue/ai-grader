@@ -9,12 +9,18 @@ import sys
 from pathlib import Path
 
 
-# Rounding detail stays in preliminary_grading_report.csv and grading_results.json;
-# the instructor's review file shows the rounded totals only.
-REVIEW_HIDDEN_COLUMNS = ("raw_total_before_rounding", "total_rounding_adjustment")
+from ai_grader.grade_adjustment import comments_for_run, review_fieldnames
 
 
-def generate_review_report(project_path, run_version=None):
+def generate_review_report(project_path, run_version=None, use_model_comments=False,
+                           client=None, model=None, comment_stats=None):
+    """
+    Write the next instructor_review_v###.csv: student, the AI grade, a
+    blank total_instructor_score for your grade, a short final_comment
+    (model-written when use_model_comments, else built from the task
+    scores), then the itemized details. comment_stats, if given, is filled
+    with counts.
+    """
     grader = Path(project_path).resolve() / "grader"
     runs = grader / "grading_runs"
     if run_version is None:
@@ -55,6 +61,15 @@ def generate_review_report(project_path, run_version=None):
             raise ValueError("Preliminary report has malformed rows.")
         row["student_name"] = student_map[row["student_id"]]["full_name"]
         row["total_instructor_score"] = ""
+    comments, fallbacks = comments_for_run(project_path, run_version, client, model,
+                                           use_model_comments)
+    for row in rows:
+        row["final_comment"] = comments.get(row["student_id"], ("", "template"))[0]
+    if comment_stats is not None:
+        comment_stats.update({
+            "ai": sum(1 for _, source in comments.values() if source == "ai"),
+            "template": sum(1 for _, source in comments.values() if source == "template"),
+            "fallbacks": sum(fallbacks.values()), "fallback_reasons": fallbacks})
 
     # Exclusive creation preserves any existing instructor edits on repeated runs.
     version = 1
@@ -65,9 +80,8 @@ def generate_review_report(project_path, run_version=None):
             break
         except FileExistsError:
             version += 1
-    shown = [name for name in fields if name not in REVIEW_HIDDEN_COLUMNS]
     with stream:
-        writer = csv.DictWriter(stream, fieldnames=["student_name", *shown],
+        writer = csv.DictWriter(stream, fieldnames=review_fieldnames(fields, adjusted=False),
                                 extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)

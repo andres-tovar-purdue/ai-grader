@@ -55,7 +55,7 @@ def feedback_body(rendered):
 def write_student_outputs(output_path, records):
     """
     Write final_grades.json (private record for exports), the final CSV
-    (Student, Username, Final Grade, Comment), the feedback CSV and
+    (Student Name, Username, Grade, Comment), the feedback CSV and
     one text file with every student's feedback, ordered by last name.
     records: student_id, username, name, final_grade, max_points, feedback,
     comment.
@@ -77,7 +77,7 @@ def write_student_outputs(output_path, records):
     with (output_path / FINAL_CSV_FILENAME).open(
             "w", encoding="utf-8-sig", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow(["Student", "Username", "Final Grade", "Comment"])
+        writer.writerow(["Student Name", "Username", "Grade", "Comment"])
         for record in records:
             writer.writerow([record["name"], record["username"],
                              f"{record['final_grade']:g}", record.get("comment", "").strip()])
