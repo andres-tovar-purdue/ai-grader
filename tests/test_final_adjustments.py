@@ -233,6 +233,11 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(compose_comment("Good.", "Excellent!", [
             {"text": "Mine.", "replace": True}]), "Mine.")
         self.assertIsNone(comment_problem("You modeled the beam well."))
+        # Assignments about AI agents or statistics may use these words.
+        self.assertIsNone(comment_problem(
+            "Your agent loop rejected invalid proposals; report a confidence interval."))
+        self.assertEqual(comment_problem("The grading agent found gaps."),
+                         "mentions grading agent")
         self.assertEqual(comment_problem("Student_004 did well."), "mentions student_")
         self.assertEqual(comment_problem("word " * 61), "too long")
 
@@ -316,6 +321,7 @@ class RoundTests(unittest.TestCase):
                           else "You did well.")
         summary = self.adjust(model)
         self.assertEqual(summary["comments"]["fallbacks"], 1)
+        self.assertEqual(summary["comments"]["fallback_reasons"], {"mentions student_": 1})
         rows = {row["student_id"]: row for row in read_rows(summary["path"])}
         self.assertIn("Your strongest work was in", rows["Student_001"]["final_comment"])
         cache = json.loads((self.run_path / COMMENT_CACHE_FILENAME).read_text(encoding="utf-8"))

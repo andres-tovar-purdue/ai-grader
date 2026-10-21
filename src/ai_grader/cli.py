@@ -292,7 +292,9 @@ def print_adjustment_summary(summary):
     comments = summary["comments"]
     print(f"Short comments: {comments['ai']} written by the model, "
           f"{comments['template']} from the task scores"
-          + (f" ({comments['fallbacks']} model comment(s) failed checks)"
+          + (f" ({comments['fallbacks']} model comment(s) failed checks: "
+             + "; ".join(f"{reason} ({count})" for reason, count
+                         in comments["fallback_reasons"].items()) + ")"
              if comments["fallbacks"] else ""))
     print()
     print("  Student      Before  After  Change  Set by    Comment starts with")

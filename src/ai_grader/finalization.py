@@ -9,19 +9,7 @@ from ai_grader.grade_adjustment import template_comment
 from ai_grader.spec_validation import validate_spec_data, load_json
 from ai_grader.submission_checks import spec_fingerprint
 from ai_grader.rounding import apply_rounding
-
-
-FORBIDDEN_STUDENT_LANGUAGE = (
-    "agent",
-    "run_v",
-    "confidence",
-    "evidence_state",
-    "evidence-state",
-    "privacy flag",
-    "instructor review",
-    "internal validation",
-    "anonymized",
-)
+from ai_grader.student_language import internal_terms
 
 
 def load_approved_scores(csv_path):
@@ -81,8 +69,7 @@ def _overall_feedback(tasks):
 
 
 def _validate_student_language(text):
-    lowered = text.casefold()
-    found = [term for term in FORBIDDEN_STUDENT_LANGUAGE if term in lowered]
+    found = internal_terms(text)
     if found:
         raise ValueError(
             "Student-facing feedback contains internal grading language: "

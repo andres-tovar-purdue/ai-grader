@@ -36,6 +36,7 @@ from ai_grader.adjustments import (
     plan_schema, validate_plan,
 )
 from ai_grader.ai_client import get_client, resolve_model
+from ai_grader.student_language import internal_terms
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -48,10 +49,7 @@ ADJUSTMENT_COLUMNS = ["grade_before_adjustment", "grade_source", "adjusted_grade
 REQUIRED_REVIEW_COLUMNS = {"student_id", "total_agent_score", "total_instructor_score"}
 COMMENT_BATCH = 10
 COMMENT_MAX_WORDS = 60
-FORBIDDEN_COMMENT_TERMS = (
-    "student_", "<student_name>", "agent", "run_v", "confidence", "evidence_state",
-    "instructor review", "internal validation", "anonymized", "rubric id",
-)
+FORBIDDEN_COMMENT_TERMS = ("student_", "<student_name>", "rubric id")
 
 
 def _number(value):
@@ -248,7 +246,7 @@ def comment_problem(comment):
     if len(text.split()) > COMMENT_MAX_WORDS:
         return "too long"
     lowered = text.casefold()
-    found = [term for term in FORBIDDEN_COMMENT_TERMS if term in lowered]
+    found = [term for term in FORBIDDEN_COMMENT_TERMS if term in lowered] + internal_terms(text)
     if found:
         return "mentions " + ", ".join(found)
     return None
@@ -278,7 +276,7 @@ def short_comments(run_path, inputs, client, model, use_model=True):
     cache_path = Path(run_path) / COMMENT_CACHE_FILENAME
     cache = (json.loads(cache_path.read_text(encoding="utf-8"))
              if cache_path.is_file() else {"comments": {}})
-    comments, usages, fallbacks = {}, [], 0
+    comments, usages, fallbacks = {}, [], {}
     wanted = []
     for student_id, tasks in sorted(inputs.items()):
         usable = [task for task in tasks if isinstance(task["score"], (int, float))]
@@ -320,7 +318,8 @@ def short_comments(run_path, inputs, client, model, use_model=True):
                                                      "comment": comment}
                 else:
                     comments[student_id] = (template_comment(tasks), "template")
-                    fallbacks += 1
+                    reason = comment_problem(comment) if comment else "no comment returned"
+                    fallbacks[reason] = fallbacks.get(reason, 0) + 1
         temporary = cache_path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(cache, indent=2) + "\n", encoding="utf-8")
         temporary.replace(cache_path)
@@ -502,7 +501,8 @@ def adjust_grades(project_path, run_version, instructions=None, plan=None,
         "reordered_pairs": result["reordered_pairs"],
         "comments": {"ai": sum(1 for c, s in comments.values() if s == "ai"),
                      "template": sum(1 for c, s in comments.values() if s == "template"),
-                     "fallbacks": fallbacks},
+                     "fallbacks": sum(fallbacks.values()),
+                     "fallback_reasons": fallbacks},
         "usage": [item for item in usage if item],
         "written": written,
     }
