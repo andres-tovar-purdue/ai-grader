@@ -249,6 +249,11 @@ A review flag is preferable to an unjustified confident judgment.
 
 Feedback should be concise, specific, and useful to the student.
 
+Task feedback is shown to the student. Never write notes to the instructor in it
+(such as "needs instructor review" or "could not be verified by the grader; please
+check"). Put those in the review fields (`review_required`, `review_reasons`) instead;
+the instructor sees them as a flag.
+
 For each task or rubric criterion:
 
 - state the deduction, if any;

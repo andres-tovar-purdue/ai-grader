@@ -23,6 +23,7 @@ FINAL_GRADES_FILENAME = "final_grades.json"
 FEEDBACK_CSV_FILENAME = "brightspace_feedback.csv"
 FEEDBACK_TEXT_FILENAME = "brightspace_feedback_to_paste.txt"
 GRADES_IMPORT_FILENAME = "brightspace_grades_import.csv"
+FINAL_CSV_FILENAME = "final_grades_for_brightspace.csv"
 
 KEY_COLUMN = "Username"
 IDENTIFIER_COLUMNS = ("OrgDefinedId", "Username")
@@ -53,9 +54,11 @@ def feedback_body(rendered):
 
 def write_student_outputs(output_path, records):
     """
-    Write final_grades.json (private record for exports), the feedback CSV
-    and one text file with every student's feedback, ordered by last name.
-    records: student_id, username, name, final_grade, max_points, feedback.
+    Write final_grades.json (private record for exports), the final CSV
+    (Student Name, Username, Grade, Comment), the feedback CSV and
+    one text file with every student's feedback, ordered by last name.
+    records: student_id, username, name, final_grade, max_points, feedback,
+    comment.
     """
     output_path = Path(output_path)
     records = sorted(records, key=sort_key)
@@ -70,6 +73,14 @@ def write_student_outputs(output_path, records):
             writer.writerow([record["username"], record["name"],
                              f"{record['final_grade']:g}", f"{record['max_points']:g}",
                              record["feedback"].strip()])
+
+    with (output_path / FINAL_CSV_FILENAME).open(
+            "w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Student Name", "Username", "Grade", "Comment"])
+        for record in records:
+            writer.writerow([record["name"], record["username"],
+                             f"{record['final_grade']:g}", record.get("comment", "").strip()])
 
     sections = []
     for record in records:

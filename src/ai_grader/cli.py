@@ -1,16 +1,23 @@
 import argparse
+import csv
 import json
 import os
 import subprocess
 from pathlib import Path
 
+import openai
 from dotenv import load_dotenv
 
 from ai_grader.ai_client import DEFAULT_MODEL, describe_model
 from ai_grader.brightspace import (
-    FEEDBACK_CSV_FILENAME, FEEDBACK_TEXT_FILENAME, BrightspaceError, export_brightspace,
+    FEEDBACK_CSV_FILENAME, FEEDBACK_TEXT_FILENAME, FINAL_CSV_FILENAME, BrightspaceError,
+    export_brightspace,
 )
-from ai_grader.finalization import finalize_grading, load_approved_scores
+from ai_grader.adjustments import AdjustmentError
+from ai_grader.grade_adjustment import adjust_grades, review_decisions
+from ai_grader.finalization import (
+    feedback_edits_from_review, finalize_grading, load_approved_scores,
+)
 from ai_grader.grading import grade_submissions
 from ai_grader.recovery import recover_grading
 from ai_grader.reporting import generate_review_report, open_report
@@ -225,6 +232,92 @@ def print_brightspace_summary(summary):
               f"{summary['export_rows_without_final_grade']}")
 
 
+def is_api_error(error):
+    """An error from the OpenAI API (any SDK version), as opposed to a bug."""
+    api_error = getattr(openai, "APIError", None)
+    return ((api_error is not None and isinstance(error, api_error))
+            or getattr(error, "status_code", None) is not None)
+
+
+def describe_api_error(error):
+    """A one-line reason for an OpenAI API error, without the raw response."""
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        body = body.get("error", body)
+        codes = {body.get("code"), body.get("type")} if isinstance(body, dict) else set()
+        if codes & {"insufficient_quota", "credit_balance_exhausted"}:
+            return ("the account has no API credits left; add credits at "
+                    "platform.openai.com > Settings > Billing")
+    status = getattr(error, "status_code", None)
+    if status in (401, 403):
+        return "the API key was not accepted; check OPENAI_API_KEY in .env"
+    if status == 429:
+        return "rate limit reached; wait a minute and run the command again"
+    return f"{type(error).__name__}: {getattr(error, 'message', error)}"
+
+
+def print_adjustment_summary(summary):
+    """The plan, the curve, target checks and anonymous before/after grades."""
+    print()
+    print(f"Started from {summary['source_review']}. What AI Grader will do:")
+    for line in summary["plan"]["summary"]:
+        print(f"  - {line}")
+    if summary["plan"]["not_supported"]:
+        print()
+        print("NOT applied (AI Grader can't do these; tell me another way or change "
+              "the itemized scores in the review):")
+        for line in summary["plan"]["not_supported"]:
+            print(f"  - {line}")
+    closest = [r["student_id"] for r in summary["readings"] if r["match"] == "closest"]
+    if closest:
+        print()
+        print("Check: a name in your instructions did not match exactly and was read as "
+              + ", ".join(closest) + ".")
+    edits = summary["hand_edits"]
+    if edits["grades"] or edits["comments"]:
+        print()
+        print(f"Kept your hand edits: {len(edits['grades'])} grade(s), "
+              f"{len(edits['comments'])} comment(s).")
+    if summary.get("instructor_totals"):
+        print()
+        print(f"Your total_instructor_score is used for {summary['instructor_totals']} "
+              "student(s); the AI total for the rest.")
+    print()
+    print(f"Curve: {summary['description']}")
+    print(f"  Equation: {summary['equation']}")
+    print(f"  Rounding: {summary['plan']['rounding']} (up)")
+    for label in ("before", "after"):
+        stats = summary[label]
+        print(f"  {label.capitalize():6} lowest {stats['min']:g}  mean {stats['mean']:g}  "
+              f"median {stats['median']:g}  highest {stats['max']:g}")
+    for item in summary["checks"]:
+        print(f"  [{'met' if item['met'] else 'NOT MET'}] {item['target']} at least "
+              f"{item['at_least']:g}: {item['achieved']:g}")
+    if summary["attention"]:
+        print()
+        print("Check these changes (much larger than the typical change, or lowered):")
+        for item in summary["attention"]:
+            print(f"  {item['student_id']}: {item['change']:+g} by {item['set_by']} "
+                  f"({item['reason']})")
+    if summary["reordered_pairs"]:
+        print(f"  Note: mappings or overrides changed the order of "
+              f"{summary['reordered_pairs']} pair(s) of students.")
+    comments = summary["comments"]
+    print(f"Short comments: {comments['ai']} written by the model, "
+          f"{comments['template']} from the task scores"
+          + (f" ({comments['fallbacks']} model comment(s) failed checks: "
+             + "; ".join(f"{reason} ({count})" for reason, count
+                         in comments["fallback_reasons"].items()) + ")"
+             if comments["fallbacks"] else ""))
+    print()
+    print("  Student      Before  After  Change  Set by    Comment starts with")
+    for student in summary["students"]:
+        opener = student["opener"] or ""
+        print(f"  {student['student_id']:<12} {student['grade_before_adjustment']:>6g} "
+              f"{student['adjusted_grade']:>6g} {student['change']:>+7g}  "
+              f"{student['set_by']:<9} {opener}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AI Grader"
@@ -390,6 +483,10 @@ def main():
     )
     report_parser.add_argument("project_path", help="Path to the project folder.")
     report_parser.add_argument("--run", help="Run version; defaults to the latest grading run.")
+    report_parser.add_argument(
+        "--template-comments", action="store_true",
+        help="Write the short comments from the task scores without the model.")
+    report_parser.add_argument("--model", help="Model for the comments. Default: OPENAI_MODEL.")
     report_parser.add_argument("--open", action="store_true",
                                help="Open the report in the default spreadsheet application.")
 
@@ -426,6 +523,11 @@ def main():
         help="Criterion override as Student_###:CRITERION_ID=POINTS.",
     )
     finalize_parser.add_argument(
+        "--accept-instructor-totals",
+        action="store_true",
+        help=argparse.SUPPRESS,     # Now the default; kept so older commands still work.
+    )
+    finalize_parser.add_argument(
         "--brightspace-template",
         help=("Grades export downloaded from Brightspace for this grade item "
               "(key field Username, Points grade). Also writes the grades import CSV."),
@@ -434,6 +536,35 @@ def main():
         "--grade-item",
         help="Brightspace grade item name, if the export has several.",
     )
+
+    # adjust-grades command
+    adjust_parser = subparsers.add_parser(
+        "adjust-grades",
+        help=("Final adjustments in plain words (a curve, raising grades, comment "
+              "wording): writes the next instructor_review_v###.csv with adjusted "
+              "grades and short comments for you to check."),
+    )
+    adjust_parser.add_argument("project_path", help="Path to the project folder.")
+    adjust_parser.add_argument("--run", required=True, help="Grading run, e.g. run_v002.")
+    what = adjust_parser.add_mutually_exclusive_group(required=True)
+    what.add_argument("--instructions",
+                      help='The adjustments in your words, in quotes, e.g. "Curve so the '
+                           'lowest grade is at least 75 and the average at least 90."')
+    what.add_argument("--instructions-file",
+                      help="A text file with the adjustments in your words.")
+    what.add_argument("--plan-file",
+                      help="Advanced: a ready adjustment plan (JSON, "
+                           "schemas/grade_adjustment_plan.schema.json); no model call.")
+    adjust_parser.add_argument(
+        "--from", dest="source_review",
+        help="Review file to start from. Default: the run's latest instructor_review_v###.csv.")
+    adjust_parser.add_argument(
+        "--restart", action="store_true",
+        help="Ignore earlier rounds' instructions and hand edits; start a new plan.")
+    adjust_parser.add_argument(
+        "--template-comments", action="store_true",
+        help="Write short comments from the task scores without the model.")
+    adjust_parser.add_argument("--model", help="Model for this command. Default: OPENAI_MODEL.")
 
     # export-brightspace command
     export_parser = subparsers.add_parser(
@@ -1194,25 +1325,115 @@ def main():
         )
 
     elif args.command == "generate-report":
+        stats = {}
         try:
-            report_path = generate_review_report(args.project_path, args.run)
-        except (ValueError, OSError, KeyError) as error:
-            parser.error(str(error))
-        print(f"Named instructor review report: {report_path}")
-        print("Review each submission and fill total_instructor_score, then save the CSV.")
-        print("Final scores remain unapproved until you complete the review.")
+            if not args.template_comments:
+                print(describe_model(args.model))
+            report_path = generate_review_report(
+                args.project_path, args.run, use_model_comments=not args.template_comments,
+                model=args.model, comment_stats=stats)
+        except (ValueError, OSError, KeyError, RuntimeError) as error:
+            print()
+            print(f"No review file written: {error}")
+            raise SystemExit(1)
+        except Exception as error:
+            if not is_api_error(error):
+                raise
+            print()
+            print("No review file written: the OpenAI API refused the request "
+                  f"({describe_api_error(error)}). Use --template-comments to write the "
+                  "comments from the task scores instead.")
+            raise SystemExit(1)
+        print(f"Review file: {report_path}")
+        print(f"Short comments: {stats.get('ai', 0)} written by the model, "
+              f"{stats.get('template', 0)} from the task scores")
+        print()
+        print("In the file, total_agent_score is the AI grade. Enter your grade in "
+              "total_instructor_score for every student (copy the AI grade where you "
+              "agree) and check final_comment. Save as CSV UTF-8. AI grades stay "
+              "preliminary until you finalize.")
+        print("Then create the final CSV (Student Name, Username, Grade, Comment):")
         print_next_command(
             f'python -m ai_grader finalize-grading "{args.project_path}" '
-            f'--run {report_path.parent.name} --scores-file "{report_path}"'
-        )
+            f'--run {report_path.parent.name} --scores-file "{report_path}"')
+        print()
+        print("Optional, before finalizing: a curve or other adjustment in your words, "
+              "for example:")
+        print()
+        print(f'python -m ai_grader adjust-grades "{args.project_path}" '
+              f'--run {report_path.parent.name} --instructions "Curve so the average is '
+              'at least 90."')
         if args.open:
             try:
                 open_report(report_path)
             except (OSError, subprocess.SubprocessError) as error:
                 print(f"Report saved, but could not open it automatically: {error}")
 
+    elif args.command == "adjust-grades":
+        try:
+            instructions, plan = args.instructions, None
+            if args.instructions_file:
+                instructions = Path(args.instructions_file).read_text(encoding="utf-8-sig")
+            if args.plan_file:
+                plan = json.loads(Path(args.plan_file).read_text(encoding="utf-8-sig"))
+            if instructions is not None or not args.template_comments:
+                print(describe_model(args.model))
+            summary = adjust_grades(
+                args.project_path, args.run, instructions=instructions, plan=plan,
+                source_review=args.source_review, restart=args.restart,
+                use_model_comments=not args.template_comments, model=args.model)
+        except (AdjustmentError, OSError, json.JSONDecodeError, RuntimeError) as error:
+            print()
+            print(f"No grades were adjusted: {error}")
+            raise SystemExit(1)
+        except Exception as error:
+            if not is_api_error(error):
+                raise
+            print()
+            print("No grades were adjusted: the OpenAI API refused the request "
+                  f"({describe_api_error(error)}). Nothing was written.")
+            print("Without the API you can still adjust with a ready plan and "
+                  "comments built from the task scores: --plan-file PLAN.json "
+                  "--template-comments.")
+            raise SystemExit(1)
+        print_adjustment_summary(summary)
+        print()
+        print(f"Review file with adjusted grades: {summary['path']}")
+        print("Open it and check adjusted_grade and final_comment. You can edit either "
+              "by hand; your edits are kept in later rounds.")
+        print()
+        print("To change something, describe it (the earlier instructions still apply):")
+        print()
+        print(f'python -m ai_grader adjust-grades "{args.project_path}" --run {args.run} '
+              '--instructions "..."')
+        print_next_command(
+            f'python -m ai_grader finalize-grading "{args.project_path}" '
+            f'--run {args.run} --scores-file "{summary["path"]}"')
+
     elif args.command == "finalize-grading":
-        approved_scores = load_approved_scores(args.scores_file) if args.scores_file else {}
+        decisions = None
+        try:
+            if args.scores_file:
+                approved_scores, decisions = review_decisions(args.scores_file)
+                if approved_scores is None:
+                    approved_scores = load_approved_scores(args.scores_file)
+            else:
+                approved_scores = {}
+        except (AdjustmentError, ValueError, OSError) as error:
+            print()
+            print(f"Not finalized: {error}")
+            raise SystemExit(1)
+        try:
+            feedback_edits = (feedback_edits_from_review(args.scores_file, args.project_path,
+                                                         args.run)
+                              if args.scores_file else {})
+        except (ValueError, OSError, KeyError) as error:
+            print()
+            print(f"Not finalized: {error}")
+            raise SystemExit(1)
+        if decisions is not None and args.score:
+            parser.error("--score can't be combined with an adjusted review file; "
+                         "change total_instructor_score and run adjust-grades again.")
         for item in args.score or []:
             student_id, score = item.split("=", 1)
             approved_scores[student_id] = float(score)
@@ -1223,17 +1444,60 @@ def main():
             student_id, criterion_id = key.split(":", 1)
             overrides[(student_id, criterion_id)] = float(score)
 
-        output_path, csv_path, txt_paths, validation = finalize_grading(
-            args.project_path,
-            args.run,
-            approved_scores,
-            overrides,
-        )
+        try:
+            output_path, csv_path, txt_paths, validation = finalize_grading(
+                args.project_path,
+                args.run,
+                approved_scores,
+                overrides,
+                decisions,
+                True,       # Your total is kept; a difference from the tasks is recorded.
+                feedback_edits,
+            )
+        except (ValueError, OSError, KeyError) as error:
+            print()
+            print(f"Not finalized: {error}")
+            raise SystemExit(1)
 
         print()
         print(f"Finalization written to: {output_path}")
         # File names below hold no student names; the folder's files do.
-        print(f"Instructor summary: {csv_path.name}")
+        print(f"Final CSV for Brightspace (Student Name, Username, Grade, Comment): "
+              f"{FINAL_CSV_FILENAME}")
+        if decisions is not None:
+            differ = [(sid, d["ai_grade"], approved_scores[sid])
+                      for sid, d in sorted(decisions.items())
+                      if d.get("ai_grade") is not None
+                      and abs(d["ai_grade"] - approved_scores[sid]) > 1e-9]
+            print(f"  Your grade differs from the AI grade for {len(differ)} of "
+                  f"{len(decisions)} student(s)" + (":" if differ else "."))
+            for sid, ai_grade, yours in differ:
+                print(f"    {sid}: AI {ai_grade:g} -> yours {yours:g} ({yours - ai_grade:+g})")
+            adjusted = sum(1 for sid, d in decisions.items()
+                           if abs(d["final_grade"] - approved_scores[sid]) > 1e-9)
+            by_hand = sum(1 for d in decisions.values() if d["grade_edited_by_hand"])
+            comments_by_hand = sum(1 for d in decisions.values() if d["comment_edited_by_hand"])
+            if adjusted:
+                print(f"  Students with an adjusted grade (curve or other adjustment): "
+                      f"{adjusted} of {len(decisions)}")
+            if by_hand or comments_by_hand:
+                print(f"  Edited by hand in the review file: {by_hand} grade(s), "
+                      f"{comments_by_hand} comment(s)")
+        with csv_path.open(encoding="utf-8", newline="") as stream:
+            summary_rows = list(csv.DictReader(stream))
+        changed_totals = sum(1 for row in summary_rows
+                             if abs(float(row["instructor_total_adjustment"] or 0)) > 1e-9)
+        flagged = [row["anonymous_student_id"] for row in summary_rows if row.get("flag")]
+        if flagged:
+            print(f"  Notes meant for you were left out of the student feedback for "
+                  f"{len(flagged)} student(s) ({', '.join(sorted(flagged))}); they are in "
+                  "the flag column of the instructor summary.")
+        edited_feedback = sum(len(items) for items in feedback_edits.values())
+        if edited_feedback:
+            print(f"  Task feedback you edited in the review file: {edited_feedback}")
+        if changed_totals:
+            print(f"  Recorded as instructor adjustments to the task totals: {changed_totals}")
+        print(f"Instructor summary (itemized): {csv_path.name}")
         print(f"Student feedback files: {len(txt_paths)} (one per student)")
         print(f"Feedback for Brightspace: {FEEDBACK_CSV_FILENAME}, "
               f"{FEEDBACK_TEXT_FILENAME} (by last name)")

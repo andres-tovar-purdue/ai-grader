@@ -1,0 +1,271 @@
+{
+  "$comment": "Final grade adjustment plan: what adjust-grades applies to the reviewed grades. Written by the model from the instructor's instructions (strict structured output) or supplied with --plan-file. Every property is required; unused values are null or empty lists.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "curve",
+    "targets",
+    "score_mappings",
+    "student_overrides",
+    "rounding",
+    "comment_rules",
+    "student_comments",
+    "not_supported"
+  ],
+  "properties": {
+    "summary": {
+      "description": "Each adjustment restated in one plain sentence for the instructor, using Student_### IDs.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "curve": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "solve_for_targets",
+        "points",
+        "fraction",
+        "slope",
+        "intercept"
+      ],
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": [
+            "none",
+            "add",
+            "scale",
+            "linear"
+          ]
+        },
+        "solve_for_targets": {
+          "type": "boolean"
+        },
+        "points": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "fraction": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "slope": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "intercept": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min_grade",
+        "mean",
+        "median",
+        "student_floors",
+        "exclude",
+        "exclude_from_mean"
+      ],
+      "properties": {
+        "min_grade": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "mean": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "median": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "student_floors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "student_id",
+              "at_least"
+            ],
+            "properties": {
+              "student_id": {
+                "type": "string"
+              },
+              "at_least": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "exclude": {
+          "description": "Students left out of the lowest-grade and median targets (for example an outlier the instructor handles separately). They are still graded and listed.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude_from_mean": {
+          "description": "True only if the instructor also wants the excluded students left out of the mean target.",
+          "type": "boolean"
+        }
+      }
+    },
+    "score_mappings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from_min",
+          "from_max",
+          "to"
+        ],
+        "properties": {
+          "from_min": {
+            "type": "number"
+          },
+          "from_max": {
+            "type": "number"
+          },
+          "to": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "student_overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "student_id",
+          "set_grade",
+          "add_points",
+          "reason",
+          "relative_to"
+        ],
+        "properties": {
+          "student_id": {
+            "type": "string"
+          },
+          "set_grade": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "add_points": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "relative_to": {
+            "description": "For add_points: 'before' adds to the grade before adjustment and replaces the curve for this student; 'after' adds on top of the curved grade. Ignored for set_grade.",
+            "type": "string",
+            "enum": [
+              "before",
+              "after"
+            ]
+          }
+        }
+      }
+    },
+    "rounding": {
+      "type": "string",
+      "enum": [
+        "whole",
+        "half",
+        "none"
+      ]
+    },
+    "comment_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from_min",
+          "from_max",
+          "based_on",
+          "opener"
+        ],
+        "properties": {
+          "from_min": {
+            "type": "number"
+          },
+          "from_max": {
+            "type": "number"
+          },
+          "based_on": {
+            "type": "string",
+            "enum": [
+              "before",
+              "after"
+            ]
+          },
+          "opener": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "student_comments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "student_id",
+          "text",
+          "replace"
+        ],
+        "properties": {
+          "student_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "replace": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "not_supported": {
+      "description": "Instructions that none of the fields above can express, quoted or paraphrased. Never guessed into another field.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
