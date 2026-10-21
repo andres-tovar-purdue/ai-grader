@@ -37,6 +37,29 @@ def load_approved_scores(csv_path):
     return approved
 
 
+def feedback_edits_from_review(csv_path, project_path, run_version):
+    """
+    Task feedback the instructor changed in a review CSV (task_N_feedback
+    columns), compared with the grading run ignoring whitespace differences.
+    Returns {student_id: {task number: text}}.
+    """
+    run_path = Path(project_path).resolve() / "grader" / "grading_runs" / run_version
+    run = json.loads((run_path / "grading_results.json").read_text(encoding="utf-8"))
+    original = {result["student_id"]: [task.get("feedback", "") for task in result["tasks"]]
+                for result in run["results"]}
+    edits = {}
+    with Path(csv_path).open("r", encoding="utf-8-sig", newline="") as stream:
+        for row in csv.DictReader(stream):
+            student_id = (row.get("student_id") or "").strip()
+            for number, text in enumerate(original.get(student_id, []), start=1):
+                edited = row.get(f"task_{number}_feedback")
+                if edited is None or not edited.strip():
+                    continue
+                if " ".join(edited.split()) != " ".join((text or "").split()):
+                    edits.setdefault(student_id, {})[number] = edited.strip()
+    return edits
+
+
 def _safe_filename(value):
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_")
 
@@ -84,6 +107,7 @@ def finalize_grading(
     criterion_overrides=None,
     decisions=None,
     accept_instructor_totals=False,
+    feedback_edits=None,
 ):
     """
     Create named final outputs without modifying an anonymous grading run.
@@ -94,8 +118,12 @@ def finalize_grading(
     task scores. An approved total that differs from the sum of the task
     scores is refused unless accept_instructor_totals is True; then the
     difference is recorded and shown as an instructor adjustment to the task
-    total, so the task scores still add up.
+    total, so the task scores still add up. feedback_edits replaces task
+    feedback the instructor edited in the review file:
+    {student_id: {task number (1-based): text}}.
     """
+    feedback_edits = feedback_edits or {}
+    language_problems = []
     project_path = Path(project_path).resolve()
     grader = project_path / "grader"
     if not re.fullmatch(r"run_v[0-9]{3}", run_version):
@@ -153,7 +181,7 @@ def finalize_grading(
             raise ValueError("Run tasks do not match the run specification.")
         tasks = []
         raw_subtotals = []
-        for task in result["tasks"]:
+        for task_number, task in enumerate(result["tasks"], start=1):
             expected = expected_tasks[task["task_id"]]
             expected_criteria = {c["criterion_id"]: c for c in expected["criteria"]}
             if (task["max_points"] != expected["max_points"]
@@ -171,7 +199,8 @@ def finalize_grading(
             raw_subtotals.append(score)
             tasks.append({"task_id": task["task_id"], "title": expected["title"],
                           "score": score, "max_points": expected["max_points"],
-                          "feedback": task["feedback"]})
+                          "feedback": feedback_edits.get(student_id, {}).get(
+                              task_number, task["feedback"])})
         policy = run.get("rounding_policy", {}).get("identifier", "exact-v1")
         rounded = apply_rounding(raw_subtotals, [t["max_points"] for t in tasks],
                                  project_maximum, policy)
@@ -199,6 +228,14 @@ def finalize_grading(
         adjustment = round(final_grade - approved_total, 6)
 
         overall = _overall_feedback(tasks)
+        found = [(f"task_{number}_feedback", internal_terms(task["feedback"]))
+                 for number, task in enumerate(tasks, start=1)]
+        found += [("final_comment", internal_terms(final_comment))]
+        found = [(where, terms) for where, terms in found if terms]
+        if found:
+            language_problems.extend(
+                f"{student_id} {where} ('{', '.join(terms)}')" for where, terms in found)
+            continue
         student_text = [
             full_name,
             spec["project"]["title"],
@@ -258,6 +295,12 @@ def finalize_grading(
             row[f"task_{index}_score"] = task["score"]
             row[f"task_{index}_feedback"] = task["feedback"]
         rows.append(row)
+
+    if language_problems:
+        raise ValueError(
+            "Student-facing text contains internal grading language (often a note "
+            "meant for you, such as a request to check something). Edit these cells in "
+            "the review file and finalize again: " + "; ".join(language_problems) + ".")
 
     output_path = _next_finalization_path(grader, run_version)
     output_path.mkdir(parents=True, exist_ok=False)

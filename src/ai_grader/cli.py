@@ -15,7 +15,9 @@ from ai_grader.brightspace import (
 )
 from ai_grader.adjustments import AdjustmentError
 from ai_grader.grade_adjustment import adjust_grades, adjusted_review_decisions
-from ai_grader.finalization import finalize_grading, load_approved_scores
+from ai_grader.finalization import (
+    feedback_edits_from_review, finalize_grading, load_approved_scores,
+)
 from ai_grader.grading import grade_submissions
 from ai_grader.recovery import recover_grading
 from ai_grader.reporting import generate_review_report, open_report
@@ -1403,6 +1405,14 @@ def main():
             print()
             print(f"Not finalized: {error}")
             raise SystemExit(1)
+        try:
+            feedback_edits = (feedback_edits_from_review(args.scores_file, args.project_path,
+                                                         args.run)
+                              if args.scores_file else {})
+        except (ValueError, OSError, KeyError) as error:
+            print()
+            print(f"Not finalized: {error}")
+            raise SystemExit(1)
         if decisions is not None and args.score:
             parser.error("--score can't be combined with an adjusted review file; "
                          "change total_instructor_score and run adjust-grades again.")
@@ -1424,6 +1434,7 @@ def main():
                 overrides,
                 decisions,
                 args.accept_instructor_totals,
+                feedback_edits,
             )
         except (ValueError, OSError, KeyError) as error:
             print()
@@ -1446,6 +1457,9 @@ def main():
         with csv_path.open(encoding="utf-8", newline="") as stream:
             changed_totals = sum(1 for row in csv.DictReader(stream)
                                  if abs(float(row["instructor_total_adjustment"] or 0)) > 1e-9)
+        edited_feedback = sum(len(items) for items in feedback_edits.values())
+        if edited_feedback:
+            print(f"  Task feedback you edited in the review file: {edited_feedback}")
         if changed_totals:
             print(f"  Your totals that differ from the task scores (kept as instructor "
                   f"adjustments): {changed_totals}")

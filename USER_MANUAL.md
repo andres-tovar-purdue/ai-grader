@@ -794,6 +794,8 @@ Finalizing from an adjusted review file is your approval of its grades and comme
 
 Each total must equal the sum of the student's task scores. If you entered a `total_instructor_score` that differs from the AI's task scores, either change the task scores (`--criterion-score Student_###:CRITERION_ID=POINTS`) or add `--accept-instructor-totals` to keep your total: the difference is recorded in the instructor summary (`instructor_total_adjustment`) and shown in the student's feedback as "Instructor adjustment to the task total", so the numbers still add up.
 
+Student feedback must not contain AI Grader's internal language, such as a note asking you to check something ("needs instructor review"). If it does, finalization stops and names each cell, for example `Student_009 task_2_feedback`. Edit that cell in the same review file, save it, and finalize again: task feedback you edit in the review file is used in the student's feedback and counted in the output.
+
 ### Finalize without the adjustment step
 
 Before finalization, determine the instructor-approved score for every anonymous student ID.

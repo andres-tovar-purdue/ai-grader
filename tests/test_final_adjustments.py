@@ -463,6 +463,42 @@ class RoundTests(unittest.TestCase):
         self.assertIn("Instructor adjustment to the task total: +4", text)
         self.assertIn("Grade before adjustment: 79/100", text)
 
+    def test_internal_notes_in_feedback_are_located_and_editable(self):
+        results_path = self.run_path / "grading_results.json"
+        run = json.loads(results_path.read_text(encoding="utf-8"))
+        run["results"][8]["tasks"][1]["feedback"] = ("Report incomplete; the notebook "
+                                                     "could not be opened, needs instructor review.")
+        results_path.write_text(json.dumps(run), encoding="utf-8")
+        rows = read_rows(self.v001)             # The review file shows the same text.
+        rows[8]["task_2_feedback"] = run["results"][8]["tasks"][1]["feedback"]
+        write_rows(self.v001, rows)
+        plan_file = self.root / "plan.json"
+        plan_file.write_text(json.dumps(target_plan()), encoding="utf-8")
+        with patch("sys.argv", ["ai_grader", "adjust-grades", str(self.root), "--run",
+                                "run_v001", "--plan-file", str(plan_file),
+                                "--template-comments"]), patch("sys.stdout", io.StringIO()):
+            main()
+        review = self.run_path / "instructor_review_v002.csv"
+        argv = ["ai_grader", "finalize-grading", str(self.root), "--run", "run_v001",
+                "--scores-file", str(review)]
+        output = io.StringIO()
+        with patch("sys.argv", argv), patch("sys.stdout", output), \
+             self.assertRaises(SystemExit):
+            main()
+        self.assertIn("Student_009 task_2_feedback ('instructor review')", output.getvalue())
+        rows = read_rows(review)
+        for row in rows:
+            if row["student_id"] == "Student_009":
+                row["task_2_feedback"] = "Report incomplete; the notebook could not be opened."
+        write_rows(review, rows)
+        output = io.StringIO()
+        with patch("sys.argv", argv), patch("sys.stdout", output):
+            main()
+        self.assertIn("Task feedback you edited in the review file: 1", output.getvalue())
+        folder = next((self.root / "grader" / "finalizations" / "run_v001").iterdir())
+        text = next(folder.glob("Jules*_feedback.txt")).read_text(encoding="utf-8")
+        self.assertIn("Report incomplete; the notebook could not be opened.\n", text)
+
     def test_cli_round_and_finalize_without_names(self):
         plan_file = self.root / "plan.json"
         plan_file.write_text(json.dumps(target_plan()), encoding="utf-8")
