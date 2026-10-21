@@ -418,5 +418,24 @@ class RoundTests(unittest.TestCase):
         self.assertIn("Not finalized: Instructor score is blank for Student_001", output.getvalue())
 
 
+    def test_cli_explains_api_refusals(self):
+        class FakeRateLimitError(Exception):        # Shaped like openai.RateLimitError.
+            status_code = 429
+            body = {"error": {"code": "credit_balance_exhausted", "type": "insufficient_quota"}}
+
+        error = FakeRateLimitError("Error code: 429")
+        output = io.StringIO()
+        with patch("ai_grader.grade_adjustment.get_client",
+                   return_value=SimpleNamespace(responses=SimpleNamespace(
+                       create=lambda **_: (_ for _ in ()).throw(error)))), \
+             patch("sys.argv", ["ai_grader", "adjust-grades", str(self.root), "--run",
+                                "run_v001", "--instructions", "Curve to a mean of 90."]), \
+             patch("sys.stdout", output), self.assertRaises(SystemExit):
+            main()
+        self.assertIn("no API credits left", output.getvalue())
+        self.assertIn("--plan-file PLAN.json --template-comments", output.getvalue())
+        self.assertEqual(len(list(self.run_path.glob("instructor_review_v*.csv"))), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

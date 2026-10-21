@@ -4,6 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import openai
 from dotenv import load_dotenv
 
 from ai_grader.ai_client import DEFAULT_MODEL, describe_model
@@ -226,6 +227,30 @@ def print_brightspace_summary(summary):
     if summary["export_rows_without_final_grade"]:
         print(f"  Students in the export without a final grade here (left out): "
               f"{summary['export_rows_without_final_grade']}")
+
+
+def is_api_error(error):
+    """An error from the OpenAI API (any SDK version), as opposed to a bug."""
+    api_error = getattr(openai, "APIError", None)
+    return ((api_error is not None and isinstance(error, api_error))
+            or getattr(error, "status_code", None) is not None)
+
+
+def describe_api_error(error):
+    """A one-line reason for an OpenAI API error, without the raw response."""
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        body = body.get("error", body)
+        codes = {body.get("code"), body.get("type")} if isinstance(body, dict) else set()
+        if codes & {"insufficient_quota", "credit_balance_exhausted"}:
+            return ("the account has no API credits left; add credits at "
+                    "platform.openai.com > Settings > Billing")
+    status = getattr(error, "status_code", None)
+    if status in (401, 403):
+        return "the API key was not accepted; check OPENAI_API_KEY in .env"
+    if status == 429:
+        return "rate limit reached; wait a minute and run the command again"
+    return f"{type(error).__name__}: {getattr(error, 'message', error)}"
 
 
 def print_adjustment_summary(summary):
@@ -1320,6 +1345,16 @@ def main():
         except (AdjustmentError, OSError, json.JSONDecodeError, RuntimeError) as error:
             print()
             print(f"No grades were adjusted: {error}")
+            raise SystemExit(1)
+        except Exception as error:
+            if not is_api_error(error):
+                raise
+            print()
+            print("No grades were adjusted: the OpenAI API refused the request "
+                  f"({describe_api_error(error)}). Nothing was written.")
+            print("Without the API you can still adjust with a ready plan and "
+                  "comments built from the task scores: --plan-file PLAN.json "
+                  "--template-comments.")
             raise SystemExit(1)
         print_adjustment_summary(summary)
         print()

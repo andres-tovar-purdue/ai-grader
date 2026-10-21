@@ -309,9 +309,9 @@ def short_comments(run_path, inputs, client, model, use_model=True):
                 usages.append(usage)
                 for item in json.loads(text or "{}").get("comments", []):
                     received[item.get("student_id")] = item.get("comment", "")
-            except Exception as error:      # Keep going with the template.
-                if getattr(error, "status_code", None) in {401, 403}:
-                    raise
+            except Exception as error:      # Keep going with the template...
+                if getattr(error, "status_code", None) in {401, 403, 429}:
+                    raise                       # ...but not without access or credits.
             for student_id, tasks, key in batch:
                 comment = (received.get(student_id) or "").strip()
                 if comment_problem(comment) is None:
