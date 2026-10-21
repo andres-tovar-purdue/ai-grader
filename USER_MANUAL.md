@@ -792,6 +792,8 @@ python -m ai_grader finalize-grading ".\projects\PROJECT_ID" --run run_v001 `
 
 Finalizing from an adjusted review file is your approval of its grades and comments. AI Grader refuses if you changed `total_instructor_score` after the last round (run `adjust-grades` again so the curve uses it).
 
+Each total must equal the sum of the student's task scores. If you entered a `total_instructor_score` that differs from the AI's task scores, either change the task scores (`--criterion-score Student_###:CRITERION_ID=POINTS`) or add `--accept-instructor-totals` to keep your total: the difference is recorded in the instructor summary (`instructor_total_adjustment`) and shown in the student's feedback as "Instructor adjustment to the task total", so the numbers still add up.
+
 ### Finalize without the adjustment step
 
 Before finalization, determine the instructor-approved score for every anonymous student ID.

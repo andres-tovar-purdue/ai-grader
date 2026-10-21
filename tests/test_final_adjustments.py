@@ -439,6 +439,30 @@ class RoundTests(unittest.TestCase):
         with self.assertRaisesRegex(AdjustmentError, "changed after the adjustment"):
             adjusted_review_decisions(summary["path"])
 
+    def test_instructor_totals_that_differ_from_the_task_scores(self):
+        rows = read_rows(self.v001)
+        for row in rows:
+            if row["student_id"] == "Student_002":
+                row["total_instructor_score"] = "79"      # AI itemized total is 75.
+        write_rows(self.v001, rows)
+        summary = self.adjust(FakeModel([target_plan()]))
+        self.assertEqual(summary["instructor_totals"], 1)
+        approved, decisions = adjusted_review_decisions(summary["path"])
+        self.assertEqual(approved["Student_002"], 79)
+        with self.assertRaisesRegex(ValueError, "--accept-instructor-totals"):
+            finalize_grading(self.root, "run_v001", approved, decisions=decisions)
+        self.assertFalse((self.root / "grader" / "finalizations").exists())
+        output, csv_path, _, validation = finalize_grading(
+            self.root, "run_v001", approved, decisions=decisions,
+            accept_instructor_totals=True)
+        self.assertTrue(validation["task_totals_match_final_scores"])
+        row = next(r for r in read_rows(csv_path) if r["anonymous_student_id"] == "Student_002")
+        self.assertEqual((row["final_instructor_score"], row["instructor_total_adjustment"]),
+                         ("79.0", "4.0"))
+        text = next(output.glob("Blake*_feedback.txt")).read_text(encoding="utf-8")
+        self.assertIn("Instructor adjustment to the task total: +4", text)
+        self.assertIn("Grade before adjustment: 79/100", text)
+
     def test_cli_round_and_finalize_without_names(self):
         plan_file = self.root / "plan.json"
         plan_file.write_text(json.dumps(target_plan()), encoding="utf-8")

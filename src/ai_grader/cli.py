@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 import os
 import subprocess
@@ -275,6 +276,10 @@ def print_adjustment_summary(summary):
         print()
         print(f"Kept your hand edits: {len(edits['grades'])} grade(s), "
               f"{len(edits['comments'])} comment(s).")
+    if summary.get("instructor_totals"):
+        print()
+        print(f"Your total_instructor_score is used for {summary['instructor_totals']} "
+              "student(s); the AI total for the rest.")
     print()
     print(f"Curve: {summary['description']}")
     print(f"  Equation: {summary['equation']}")
@@ -510,6 +515,13 @@ def main():
         action="append",
         default=[],
         help="Criterion override as Student_###:CRITERION_ID=POINTS.",
+    )
+    finalize_parser.add_argument(
+        "--accept-instructor-totals",
+        action="store_true",
+        help=("Keep an approved total that differs from the sum of the task scores; "
+              "the difference is recorded and shown as an instructor adjustment to "
+              "the task total."),
     )
     finalize_parser.add_argument(
         "--brightspace-template",
@@ -1411,6 +1423,7 @@ def main():
                 approved_scores,
                 overrides,
                 decisions,
+                args.accept_instructor_totals,
             )
         except (ValueError, OSError, KeyError) as error:
             print()
@@ -1430,6 +1443,12 @@ def main():
             if by_hand or comments_by_hand:
                 print(f"  Edited by hand in the review file: {by_hand} grade(s), "
                       f"{comments_by_hand} comment(s)")
+        with csv_path.open(encoding="utf-8", newline="") as stream:
+            changed_totals = sum(1 for row in csv.DictReader(stream)
+                                 if abs(float(row["instructor_total_adjustment"] or 0)) > 1e-9)
+        if changed_totals:
+            print(f"  Your totals that differ from the task scores (kept as instructor "
+                  f"adjustments): {changed_totals}")
         print(f"Instructor summary (itemized): {csv_path.name}")
         print(f"Student feedback files: {len(txt_paths)} (one per student)")
         print(f"Feedback for Brightspace: {FEEDBACK_CSV_FILENAME}, "

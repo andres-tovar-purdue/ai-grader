@@ -83,6 +83,7 @@ def finalize_grading(
     approved_scores,
     criterion_overrides=None,
     decisions=None,
+    accept_instructor_totals=False,
 ):
     """
     Create named final outputs without modifying an anonymous grading run.
@@ -90,7 +91,10 @@ def finalize_grading(
     scores. decisions (from an adjusted review file) give each student's
     final grade and comment after the final adjustment; without them the
     final grade is the approved total and the comment is generated from the
-    task scores.
+    task scores. An approved total that differs from the sum of the task
+    scores is refused unless accept_instructor_totals is True; then the
+    difference is recorded and shown as an instructor adjustment to the task
+    total, so the task scores still add up.
     """
     project_path = Path(project_path).resolve()
     grader = project_path / "grader"
@@ -176,9 +180,13 @@ def finalize_grading(
         approved_total = float(approved_scores[student_id])
         if not math.isfinite(approved_total) or not 0 <= approved_total <= project_maximum:
             raise ValueError("Approved score is outside the project point range.")
-        if abs(rounded["final_rounded_grade"] - approved_total) > 1e-6:
-            raise ValueError(f"Calculated final score for {student_id} is "
-                             f"{rounded['final_rounded_grade']:g}, not approved score {approved_total:g}.")
+        instructor_change = round(approved_total - rounded["final_rounded_grade"], 6)
+        if abs(instructor_change) > 1e-6 and not accept_instructor_totals:
+            raise ValueError(
+                f"Calculated final score for {student_id} is "
+                f"{rounded['final_rounded_grade']:g}, not approved score {approved_total:g}. "
+                "Change the task scores (--criterion-score), or keep your total as an "
+                "instructor adjustment to the task total (--accept-instructor-totals).")
 
         if decisions is not None:
             final_grade = float(decisions[student_id]["final_grade"])
@@ -206,6 +214,9 @@ def finalize_grading(
                 task["feedback"],
                 "",
             ])
+        if abs(instructor_change) > 1e-6:
+            student_text.extend([
+                f"Instructor adjustment to the task total: {instructor_change:+g}", ""])
         student_text.extend([
             "Overall Feedback",
             overall,
@@ -235,7 +246,9 @@ def finalize_grading(
             "preliminary_baseline_score": result["total_agent_score"],
             "final_instructor_score": approved_total,
             "overall_feedback": overall,
-            "final_rounding_adjustment": round(approved_total - sum(t["score"] for t in tasks), 6),
+            "final_rounding_adjustment": round(rounded["final_rounded_grade"]
+                                               - sum(t["score"] for t in tasks), 6),
+            "instructor_total_adjustment": instructor_change,
             "final_adjustment": adjustment,
             "final_grade": final_grade,
             "final_grade_edited_by_hand": str(edited).lower(),
@@ -262,6 +275,7 @@ def finalize_grading(
         ],
         "overall_feedback",
         "final_rounding_adjustment",
+        "instructor_total_adjustment",
         "final_adjustment",
         "final_grade",
         "final_grade_edited_by_hand",
@@ -315,7 +329,8 @@ def validate_finalization(output_path, expected_rows, text_outputs, approved_sco
             if re.fullmatch(r"task_\d+_score", key)
         ]
         final_score = float(row["final_instructor_score"])
-        adjustment = float(row.get("final_rounding_adjustment", 0))
+        adjustment = (float(row.get("final_rounding_adjustment", 0))
+                      + float(row.get("instructor_total_adjustment") or 0))
         if abs(sum(task_scores) + adjustment - final_score) > 1e-6:
             raise ValueError(f"Task arithmetic failed for {student_id}.")
         if abs(final_score - float(approved_scores[student_id])) > 1e-6:
