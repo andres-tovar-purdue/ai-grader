@@ -748,7 +748,8 @@ What AI Grader can do:
 | Curve to targets | lowest grade, average, median, or one student's grade "at least" a value. AI Grader finds the **smallest** curve that meets all of them. |
 | Curve by amount | "add 5 points to everyone"; "close 30% of each student's missing points"; an equation "new = 0.8 x old + 20" |
 | Raise grades | "99 becomes 100"; "95 to 98 become 98" (only raises) |
-| One student | "set Student_004 to 88 because ..." or "+3 for Student_004 because ..." (always with a reason) |
+| One student | "set Student_004 to 88 because ..."; "give Student_009 +10 instead of the curve" (added to the grade before adjustment); "after the curve, +2 for Student_004" (always with a reason). A student with an override is left out of the curve. |
+| Outliers | "don't count Student_009 in the lowest-grade target": the lowest-grade and median targets leave the student out; the class mean still counts everyone unless you say otherwise |
 | Comments | words at the start of the comment by grade ("Excellent!" for 100); text added to, or replacing, one student's comment |
 | Rounding | whole points (default), half points, or none; curved grades round up |
 
@@ -756,7 +757,7 @@ The default curve gives every student the same share of the points they were mis
 
 Instructions AI Grader can't carry out (for example changing itemized scores, late penalties or extra credit above the maximum) are listed as **NOT applied**; nothing is guessed. Change itemized scores in the review instead.
 
-The command prints what it understood, the curve equation, the lowest, mean, median and highest grade before and after, whether each target is met, and every student's grade before and after, by anonymous ID only.
+The command prints what it understood, the curve equation, the lowest, mean, median and highest grade before and after, whether each target is met, and every student's grade before and after, by anonymous ID only. Under **Check these changes** it lists any student whose change is much larger than the typical raise (at least 5 points and 3 times the median raise) or whose grade went down, so an outsized curve or override is hard to miss.
 
 **Student names.** You can name a student in the instructions. Names are replaced with anonymous IDs on your computer before anything is sent to the model. A name that matches several students (two students called Ana) is refused: use the full name or the Brightspace username. A misspelled name is read as the closest student and printed for you to check.
 

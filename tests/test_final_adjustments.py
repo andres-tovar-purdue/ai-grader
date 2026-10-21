@@ -177,10 +177,64 @@ class EngineTests(unittest.TestCase):
         plan = empty_plan()
         plan["curve"].update(method="linear", slope=0.5, intercept=50)
         plan["student_overrides"] = [{"student_id": "Student_002", "set_grade": 70,
-                                      "add_points": None, "reason": "Academic integrity case"}]
+                                      "add_points": None, "relative_to": "after", "reason": "Academic integrity case"}]
         result = apply_plan(base, validate_plan(plan, base, 100), 100)
         self.assertEqual([(s["adjusted_grade"], s["set_by"]) for s in result["students"]],
                          [(80, "curve"), (70, "override"), (99, "curve")])
+
+    def test_outlier_handled_separately(self):
+        values = [93, 77, 80, 96, 99, 95, 100, 89, 38, 99, 68]
+        base = {f"Student_{i:03d}": float(v) for i, v in enumerate(values, start=1)}
+        plan = empty_plan()
+        plan["curve"].update(method="scale", solve_for_targets=True)
+        plan["targets"].update(min_grade=75, mean=90, exclude=["Student_009"],
+                               student_floors=[{"student_id": "Student_003", "at_least": 85}])
+        plan["student_overrides"] = [{"student_id": "Student_009", "set_grade": None,
+                                      "add_points": 10, "relative_to": "before",
+                                      "reason": "Outlier; proportional raise"}]
+        result = apply_plan(base, validate_plan(plan, base, 100), 100)
+        grades = {s["student_id"]: s["adjusted_grade"] for s in result["students"]}
+        self.assertEqual(grades["Student_009"], 48)              # 38 + 10, not curved.
+        self.assertGreaterEqual(grades["Student_011"], 75)
+        labels = [c["target"] for c in result["checks"]]
+        self.assertIn("lowest grade (without Student_009)", labels)
+        self.assertIn("class mean", labels)                      # Mean still counts everyone.
+        self.assertGreaterEqual(sum(grades.values()) / 11, 90)
+        plan["targets"]["exclude_from_mean"] = True
+        smaller = apply_plan(base, validate_plan(plan, base, 100), 100)
+        self.assertLess(smaller["parameter"], result["parameter"])
+        self.assertIn("class mean (without Student_009)",
+                      [c["target"] for c in smaller["checks"]])
+        # "after" adds on top of the curve instead.
+        plan["student_overrides"][0]["relative_to"] = "after"
+        after = apply_plan(base, validate_plan(plan, base, 100), 100)
+        self.assertGreater(after["students"][8]["adjusted_grade"], 48)
+
+    def test_large_changes_are_flagged(self):
+        values = [93, 77, 80, 96, 99, 95, 100, 89, 38, 99, 68]
+        base = {f"Student_{i:03d}": float(v) for i, v in enumerate(values, start=1)}
+        plan = empty_plan()
+        plan["curve"].update(method="scale", fraction=0.2)
+        plan["student_overrides"] = [{"student_id": "Student_009", "set_grade": 75,
+                                      "add_points": None, "relative_to": "after",
+                                      "reason": "Class minimum"},
+                                     {"student_id": "Student_004", "set_grade": 90,
+                                      "add_points": None, "relative_to": "after",
+                                      "reason": "Lowered for a policy reason"}]
+        flagged = apply_plan(base, validate_plan(plan, base, 100), 100)["attention"]
+        self.assertEqual([(f["student_id"], f["change"], f["reason"]) for f in flagged],
+                         [("Student_004", -6, "grade lowered"),
+                          ("Student_009", 37, "typical raise is +3")])
+
+    def test_plans_saved_before_new_fields_still_work(self):
+        from ai_grader.adjustments import upgrade_plan
+        plan = empty_plan()
+        del plan["targets"]["exclude"], plan["targets"]["exclude_from_mean"]
+        plan["student_overrides"] = [{"student_id": "Student_001", "set_grade": None,
+                                      "add_points": 2, "reason": "Old plan"}]
+        plan = upgrade_plan(plan)
+        validate_plan(plan, {"Student_001": 50.0}, 100)
+        self.assertEqual(plan["student_overrides"][0]["relative_to"], "after")
 
     def test_invalid_plans_are_refused(self):
         base = {"Student_001": 60.0}
@@ -193,7 +247,7 @@ class EngineTests(unittest.TestCase):
                  "lower grades"),
                 (lambda p: p["targets"].update(mean=120), "outside 0-100"),
                 (lambda p: p["student_overrides"].append(
-                    {"student_id": "Student_001", "set_grade": 70, "add_points": None,
+                    {"student_id": "Student_001", "set_grade": 70, "add_points": None, "relative_to": "after",
                      "reason": " "}), "needs a reason"),
                 (lambda p: p.pop("rounding"), "malformed")]:
             plan = empty_plan()
@@ -204,7 +258,7 @@ class EngineTests(unittest.TestCase):
         plan["curve"].update(method="scale", solve_for_targets=True)
         plan["targets"]["min_grade"] = 75
         plan["student_overrides"] = [{"student_id": "Student_001", "set_grade": 50,
-                                      "add_points": None, "reason": "Instructor decision"}]
+                                      "add_points": None, "relative_to": "after", "reason": "Instructor decision"}]
         with self.assertRaisesRegex(AdjustmentError, "No curve of this kind"):
             apply_plan(base, validate_plan(plan, base, 100), 100)
 

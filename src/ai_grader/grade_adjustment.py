@@ -33,7 +33,7 @@ from pathlib import Path
 
 from ai_grader.adjustments import (
     AdjustmentError, anonymize_instructions, apply_plan, compose_comment, empty_plan,
-    plan_schema, validate_plan,
+    plan_schema, upgrade_plan, validate_plan,
 )
 from ai_grader.ai_client import get_client, resolve_model
 from ai_grader.student_language import internal_terms
@@ -365,7 +365,7 @@ def _keep_hand_edits(plan, edited_grades, edited_comments, source):
             item for item in plan["student_overrides"]
             if item["student_id"] not in edited_grades] + [
             {"student_id": sid, "set_grade": grade, "add_points": None,
-             "reason": f"Changed by hand in {source}"}
+             "relative_to": "after", "reason": f"Changed by hand in {source}"}
             for sid, grade in sorted(edited_grades.items())]
     if edited_comments:
         plan["student_comments"] = [
@@ -414,7 +414,7 @@ def adjust_grades(project_path, run_version, instructions=None, plan=None,
     previous_record_path = sidecar_path(source_review)
     previous = (json.loads(previous_record_path.read_text(encoding="utf-8"))
                 if previous_record_path.is_file() and not restart else None)
-    previous_plan = copy.deepcopy(previous["plan"]) if previous else None
+    previous_plan = upgrade_plan(copy.deepcopy(previous["plan"])) if previous else None
     history = list(previous["instruction_history"]) if previous else []
     edited_grades, edited_comments = hand_edits(source_review, rows) if not restart else ({}, {})
     if previous_plan is not None and (edited_grades or edited_comments):
@@ -444,7 +444,8 @@ def adjust_grades(project_path, run_version, instructions=None, plan=None,
     else:
         history.append({"round": _next_review_path(run_path).name,
                         "instructions": "(plan file)", "anonymized": "(plan file)"})
-    plan = _keep_hand_edits(plan, edited_grades, edited_comments, source_review.name)
+    plan = _keep_hand_edits(upgrade_plan(plan), edited_grades, edited_comments,
+                            source_review.name)
     validate_plan(plan, base_values, maximum)
     result = apply_plan(base_values, plan, maximum)
 
@@ -496,6 +497,7 @@ def adjust_grades(project_path, run_version, instructions=None, plan=None,
         "curve": {"description": result["description"], "equation": result["equation"],
                   "parameter": result["parameter"]},
         "checks": result["checks"],
+        "attention": result["attention"],
         "before": result["before"],
         "after": result["after"],
         "reordered_pairs": result["reordered_pairs"],

@@ -286,6 +286,12 @@ def print_adjustment_summary(summary):
     for item in summary["checks"]:
         print(f"  [{'met' if item['met'] else 'NOT MET'}] {item['target']} at least "
               f"{item['at_least']:g}: {item['achieved']:g}")
+    if summary["attention"]:
+        print()
+        print("Check these changes (much larger than the typical change, or lowered):")
+        for item in summary["attention"]:
+            print(f"  {item['student_id']}: {item['change']:+g} by {item['set_by']} "
+                  f"({item['reason']})")
     if summary["reordered_pairs"]:
         print(f"  Note: mappings or overrides changed the order of "
               f"{summary['reordered_pairs']} pair(s) of students.")

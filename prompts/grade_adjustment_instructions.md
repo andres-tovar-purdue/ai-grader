@@ -52,6 +52,14 @@ for the average, `median` for the median, and `student_floors` for a named
 student ("X's grade should be >= 85"). Use null or an empty list when not
 given. A target such as "average around 90" means at least 90.
 
+`exclude` lists students left out of the lowest-grade and median targets,
+for example an outlier the instructor handles separately ("don't let
+Student_009 drive the curve", "the lowest of the others should be 75"). Put a
+student here only when the instructor says so or clearly treats the student
+separately. The class mean still includes them unless the instructor says
+otherwise; then set `exclude_from_mean` to true. Say in the summary which
+targets leave the student out.
+
 ### score_mappings
 
 "Students with a grade of 99 should be 100" becomes
@@ -65,6 +73,22 @@ One student's grade set to a value (`set_grade`) or changed by points
 (`add_points`, may be negative), with the instructor's reason in plain words.
 Use these only when the instructor names a single student and a specific grade
 or change, not for targets (those are `student_floors`).
+
+An override replaces the curve for that student, and AI Grader applies it
+while choosing the curve, so an override is how a student is **left out of
+the curve**: never report "exclude a student from the curve" as not
+supported. `relative_to` says what `add_points` is added to:
+
+- `before`: the grade before adjustment, instead of the curve ("give
+  Student_009 +10 instead", "Student_009 gets 10 more points than they had").
+- `after`: on top of the curved grade ("after the curve, add 2 more points
+  for Student_004").
+
+When an earlier override for the same student is replaced, remove the old
+one. If a student with an override was the reason for a lowest-grade target,
+consider whether the instructor now means to leave that student out of the
+targets, and if it isn't clear, keep the targets as they are and say so in
+the summary.
 
 ### rounding
 

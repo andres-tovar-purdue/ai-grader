@@ -48,7 +48,8 @@ def empty_plan():
         "summary": [],
         "curve": {"method": "none", "solve_for_targets": False, "points": None,
                   "fraction": None, "slope": None, "intercept": None},
-        "targets": {"min_grade": None, "mean": None, "median": None, "student_floors": []},
+        "targets": {"min_grade": None, "mean": None, "median": None, "student_floors": [],
+                    "exclude": [], "exclude_from_mean": False},
         "score_mappings": [],
         "student_overrides": [],
         "rounding": "whole",
@@ -56,6 +57,22 @@ def empty_plan():
         "student_comments": [],
         "not_supported": [],
     }
+
+
+def upgrade_plan(plan):
+    """
+    Fill fields added after a plan was saved, with their old meaning:
+    no students excluded from targets, add_points on top of the curve.
+    """
+    if isinstance(plan, dict):
+        targets = plan.get("targets")
+        if isinstance(targets, dict):
+            targets.setdefault("exclude", [])
+            targets.setdefault("exclude_from_mean", False)
+        for override in plan.get("student_overrides") or []:
+            if isinstance(override, dict):
+                override.setdefault("relative_to", "after")
+    return plan
 
 
 def plan_schema():
@@ -104,6 +121,10 @@ def validate_plan(plan, student_ids, maximum):
         problems.append("A linear curve's intercept must be a finite number.")
     for key in ("min_grade", "mean", "median"):
         number(targets[key], f"Target {key.replace('_', ' ')}")
+    for student_id in targets["exclude"]:
+        student(student_id, "A student left out of the targets")
+    if len(set(targets["exclude"])) >= len(student_ids):
+        problems.append("Every student is left out of the targets.")
     for floor in targets["student_floors"]:
         student(floor["student_id"], "A student target")
         number(floor["at_least"], f"Target for {floor['student_id']}")
@@ -186,6 +207,8 @@ def _grades(order, base, plan, maximum, parameter):
         for override in overrides.get(student_id, []):
             if override["set_grade"] is not None:
                 grade = override["set_grade"]
+            elif override["relative_to"] == "before":
+                grade = before + override["add_points"]
             else:
                 grade = grade + override["add_points"]
             grade, rule = min(max(grade, 0.0), maximum), "override"
@@ -207,12 +230,18 @@ def statistics(values):
 
 
 def check_targets(grades, targets):
-    values = list(grades.values())
+    excluded = set(targets.get("exclude", []))
+    kept = [grade for student_id, grade in grades.items() if student_id not in excluded]
+    without = f" (without {', '.join(sorted(excluded))})" if excluded else ""
+    if targets.get("exclude_from_mean"):
+        mean_values, mean_label = kept, f"class mean{without}"
+    else:
+        mean_values, mean_label = list(grades.values()), "class mean"
     checks = []
     for key, label, achieved in (
-            ("min_grade", "lowest grade", min(values)),
-            ("mean", "class mean", sum(values) / len(values)),
-            ("median", "median", _median(values))):
+            ("min_grade", f"lowest grade{without}", min(kept)),
+            ("mean", mean_label, sum(mean_values) / len(mean_values)),
+            ("median", f"median{without}", _median(kept))):
         if targets[key] is not None:
             checks.append({"target": label, "at_least": targets[key],
                            "achieved": round(achieved, 2),
@@ -315,6 +344,7 @@ def apply_plan(base, plan, maximum):
     reordered = sum(1 for a in order for b in order
                     if base[a] < base[b] - TOLERANCE and grades[a] > grades[b] + TOLERANCE)
     return {
+        "attention": attention(students),
         "parameter": parameter,
         "description": description,
         "equation": equation,
@@ -324,6 +354,26 @@ def apply_plan(base, plan, maximum):
         "after": statistics(grades.values()),
         "reordered_pairs": reordered,
     }
+
+
+def attention(students):
+    """
+    Changes worth a second look: much larger than the typical change (at
+    least 5 points and 3 times the median raise), or a grade that went down.
+    """
+    raises = sorted(s["change"] for s in students if s["change"] > TOLERANCE)
+    typical = _median(raises) if raises else 0.0
+    threshold = max(5.0, 3 * typical)
+    flagged = []
+    for student in students:
+        if student["change"] < -TOLERANCE:
+            flagged.append({"student_id": student["student_id"], "change": student["change"],
+                            "set_by": student["set_by"], "reason": "grade lowered"})
+        elif student["change"] >= threshold - TOLERANCE:
+            flagged.append({"student_id": student["student_id"], "change": student["change"],
+                            "set_by": student["set_by"],
+                            "reason": f"typical raise is +{typical:g}"})
+    return flagged
 
 
 def compose_comment(short_comment, opener="", student_comments=()):
