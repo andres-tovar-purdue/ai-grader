@@ -8,7 +8,8 @@ from unittest.mock import patch
 
 from ai_grader.cli import main
 from ai_grader.spec_generation import (
-    InvalidSpecResponseError, generate_grading_spec, strip_schema_metadata,
+    InvalidSpecResponseError, derived_presence_deliverables, fill_presence_patterns,
+    generate_grading_spec, presence_patterns_from, strip_schema_metadata,
 )
 
 
@@ -29,7 +30,7 @@ class FakeResponses:
         return SimpleNamespace(output_text=self.output_text)
 
 
-class SpecGenerationTests(unittest.TestCase):
+class SpecProjectBase(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -54,6 +55,17 @@ class SpecGenerationTests(unittest.TestCase):
     def invalid_responses(self):
         return sorted(self.grader.glob("invalid_spec_response_*.json"))
 
+    def assert_saved_and_rejected(self, output_text):
+        with self.assertRaises(InvalidSpecResponseError) as raised:
+            self.generate(output_text)
+        error = raised.exception
+        self.assertEqual(self.invalid_responses(), [error.response_path])
+        self.assertEqual(error.response_path.read_text(encoding="utf-8"), output_text)
+        self.assertEqual(self.specs_written(), [])
+        return error
+
+
+class SpecGenerationTests(SpecProjectBase):
     def test_prompt_says_not_to_include_schema_keywords(self):
         _, responses = self.generate(json.dumps(VALID_SPEC))
         self.assertIn("$schema, $id or $comment", responses.calls[0]["input"])
@@ -74,14 +86,6 @@ class SpecGenerationTests(unittest.TestCase):
         spec = {"$schema": "x", "project": {"$comment": "kept"}}
         self.assertEqual(strip_schema_metadata(spec), {"project": {"$comment": "kept"}})
 
-    def assert_saved_and_rejected(self, output_text):
-        with self.assertRaises(InvalidSpecResponseError) as raised:
-            self.generate(output_text)
-        error = raised.exception
-        self.assertEqual(self.invalid_responses(), [error.response_path])
-        self.assertEqual(error.response_path.read_text(encoding="utf-8"), output_text)
-        self.assertEqual(self.specs_written(), [])
-        return error
 
     def test_invalid_spec_saves_raw_response(self):
         spec = {**VALID_SPEC, "unexpected_field": True}
@@ -110,6 +114,117 @@ class SpecGenerationTests(unittest.TestCase):
     def test_non_object_response_saves_raw_response(self):
         error = self.assert_saved_and_rejected("[]")
         self.assertEqual(error.messages, ["The response is not a JSON object."])
+
+
+def spec_with_presence_rule(file_patterns=("username_pr01_notebook.ipynb",)):
+    """VALID_SPEC with a file_presence rule on the notebook deliverable, which
+    has file_patterns but no presence_patterns (what gpt-5.5 produced)."""
+    spec = json.loads(json.dumps(VALID_SPEC))
+    deliverable = next(item for item in spec["deliverables"]
+                       if item["deliverable_id"] == "notebook_ipynb")
+    deliverable.pop("presence_patterns", None)
+    deliverable["file_patterns"] = list(file_patterns)
+    criterion = spec["tasks"][0]["criteria"][0]
+    rule = criterion["deduction_rules"][0]
+    criterion["deduction_rules"].append({
+        "rule_id": "t1_c1_missing_notebook",
+        "condition": "The notebook is missing entirely.",
+        "deduction_points": rule["deduction_points"],
+        "feedback_template": "Submit the notebook.",
+        "basis": "file_presence",
+        "deliverable_id": "notebook_ipynb",
+    })
+    return spec
+
+
+class PresencePatternTests(SpecProjectBase):
+    def test_missing_presence_patterns_are_derived_from_file_patterns(self):
+        (output_path, spec), _ = self.generate(json.dumps(spec_with_presence_rule()))
+        deliverable = next(item for item in spec["deliverables"]
+                           if item["deliverable_id"] == "notebook_ipynb")
+        self.assertEqual(deliverable["presence_patterns"], ["*_pr01_notebook.ipynb"])
+        self.assertIn("derived by AI Grader", deliverable["notes"])
+        self.assertEqual(derived_presence_deliverables(spec), ["notebook_ipynb"])
+        others = [item for item in spec["deliverables"]
+                  if item["deliverable_id"] != "notebook_ipynb"]
+        self.assertFalse(any(item.get("presence_patterns") for item in others))
+        self.assertEqual(json.loads(output_path.read_text(encoding="utf-8")), spec)
+
+    def test_patterns_match_anonymized_names(self):
+        import fnmatch
+        patterns = presence_patterns_from(["username_pr02_notebook.ipynb",
+                                           "figures/USERNAME_pr02_validation.png"])
+        self.assertEqual(patterns, ["*_pr02_notebook.ipynb", "*_pr02_validation.png"])
+        for name in ["artifact_003_student_pr02_notebook.ipynb",
+                     "x.zip_contents/artifact_010_Student_PR02_Notebook.ipynb"]:
+            self.assertTrue(fnmatch.fnmatchcase(name.lower(), patterns[0].lower()), name)
+
+    def test_existing_presence_patterns_are_kept(self):
+        spec = spec_with_presence_rule()
+        next(item for item in spec["deliverables"]
+             if item["deliverable_id"] == "notebook_ipynb")["presence_patterns"] = ["*.ipynb"]
+        self.assertEqual(fill_presence_patterns(spec), [])
+
+    def test_without_file_patterns_the_rule_is_still_rejected(self):
+        spec = spec_with_presence_rule(file_patterns=())
+        error = self.assert_saved_and_rejected(json.dumps(spec))
+        self.assertIn("File presence rules require deliverable presence_patterns.",
+                      error.messages)
+
+    def test_prompt_explains_presence_patterns(self):
+        _, responses = self.generate(json.dumps(VALID_SPEC))
+        self.assertIn("presence_patterns", responses.calls[0]["input"])
+        self.assertIn("*_pr02_notebook.ipynb", responses.calls[0]["input"])
+
+
+class SavedResponseTests(SpecProjectBase):
+    def test_saved_response_is_used_without_a_model_request(self):
+        self.grader.mkdir()
+        saved = self.grader / "invalid_spec_response_20261109_144641_240110.json"
+        saved.write_text(json.dumps(spec_with_presence_rule()), encoding="utf-8")
+        with patch("ai_grader.spec_generation.get_client",
+                   side_effect=AssertionError("no model request expected")):
+            output_path, spec = generate_grading_spec(self.project, SCHEMA_PATH,
+                                                      response_path=saved)
+        self.assertEqual(output_path.name, "grading_spec_v001.json")
+        self.assertEqual(spec["status"], "draft")
+        self.assertTrue(saved.is_file())
+
+    def test_invalid_saved_response_is_not_saved_again(self):
+        self.grader.mkdir()
+        saved = self.grader / "invalid_spec_response_20261109_000000_000000.json"
+        saved.write_text("[]", encoding="utf-8")
+        with self.assertRaises(InvalidSpecResponseError) as raised:
+            generate_grading_spec(self.project, SCHEMA_PATH, response_path=saved)
+        self.assertFalse(raised.exception.saved_again)
+        self.assertEqual(self.invalid_responses(), [saved])
+        self.assertEqual(self.specs_written(), [])
+
+    def test_cli_from_response(self):
+        self.grader.mkdir()
+        saved = self.grader / "invalid_spec_response_20261109_144641_240110.json"
+        saved.write_text(json.dumps(spec_with_presence_rule()), encoding="utf-8")
+        output = io.StringIO()
+        with patch("ai_grader.spec_generation.get_client",
+                   side_effect=AssertionError("no model request expected")), \
+             patch("sys.argv", ["ai_grader", "generate-spec", str(self.project),
+                                "--from-response", str(saved)]), \
+             patch("sys.stdout", output):
+            main()
+        text = output.getvalue()
+        self.assertIn("No AI request: using the saved response", text)
+        self.assertNotIn("Model:", text)
+        self.assertIn("File-presence patterns filled in by AI Grader for 1 deliverable(s): "
+                      "notebook_ipynb", text)
+        self.assertIn("grading_spec_v001.json", text)
+
+    def test_cli_missing_saved_response(self):
+        output = io.StringIO()
+        with patch("sys.argv", ["ai_grader", "generate-spec", str(self.project),
+                                "--from-response", str(self.grader / "nope.json")]), \
+             patch("sys.stdout", output), self.assertRaises(SystemExit):
+            main()
+        self.assertIn("Saved response not found", output.getvalue())
 
 
 class GenerateSpecCommandTests(unittest.TestCase):

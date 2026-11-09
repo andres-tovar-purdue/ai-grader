@@ -478,7 +478,13 @@ If the generated specification still fails the checks, no draft is written. AI G
 grader\invalid_spec_response_<timestamp>.json
 ```
 
-Rerun `generate-spec` to try again.
+Rerun `generate-spec` to try again (a new AI request), or, after updating AI Grader with a fix for the reported problem, check the saved response again without a new request:
+
+```powershell
+python -m ai_grader generate-spec .\projects\PROJECT_ID --from-response ".\projects\PROJECT_ID\grader\invalid_spec_response_<timestamp>.json"
+```
+
+A missing-file deduction (a rule with basis `file_presence`) needs patterns that find the file among the anonymized file names. When the model leaves them out, AI Grader derives them from the required file name (for `username_pr02_notebook.ipynb`, the pattern `*_pr02_notebook.ipynb`), says so when it writes the draft, and records it in that deliverable's notes.
 
 ---
 
@@ -1030,10 +1036,10 @@ python -m ai_grader prepare-project PROJECT_PATH
 Generate instructor-reviewable project instructions, rubric, and reference solution.
 
 ```text
-python -m ai_grader generate-spec PROJECT_PATH
+python -m ai_grader generate-spec PROJECT_PATH [--from-response SAVED_RESPONSE.json]
 ```
 
-Generate the draft grading specification.
+Generate the draft grading specification. `--from-response` checks a saved model response again instead of making a new AI request.
 
 ```text
 python -m ai_grader validate SPEC_PATH

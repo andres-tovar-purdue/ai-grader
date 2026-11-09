@@ -32,7 +32,9 @@ from ai_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
 from ai_grader.run_archive import ArchiveError, archive_grading
 from ai_grader.setup_check import run_setup_checks
 from ai_grader.spec_approval import approve_grading_spec
-from ai_grader.spec_generation import InvalidSpecResponseError, generate_grading_spec
+from ai_grader.spec_generation import (
+    InvalidSpecResponseError, derived_presence_deliverables, generate_grading_spec,
+)
 from ai_grader.spec_validation import validate_grading_spec
 from ai_grader.submission_processing import (
     SubmissionsAlreadyGradedError, previous_preparation_paths, write_submission_manifest,
@@ -425,6 +427,11 @@ def main():
     generate_spec_parser.add_argument(
         "project_path",
         help="Path to the project folder."
+    )
+    generate_spec_parser.add_argument(
+        "--from-response",
+        help=("Use a saved model response (e.g. grader\\invalid_spec_response_*.json "
+              "from an earlier run) instead of a new AI request."),
     )
 
     # approve-spec command
@@ -1005,12 +1012,19 @@ def main():
             / "grading_spec.schema.json"
         )
 
-        print(describe_model())
+        if args.from_response:
+            print(f"No AI request: using the saved response {args.from_response}")
+        else:
+            print(describe_model())
         try:
             output_path, spec = generate_grading_spec(
                 args.project_path,
                 schema_path,
+                response_path=args.from_response,
             )
+        except FileNotFoundError as error:
+            print(f"generate-spec: {error}")
+            raise SystemExit(1)
         except InvalidSpecResponseError as error:
             print()
             print("The generated grading specification failed validation.")
@@ -1022,9 +1036,10 @@ def main():
             if len(error.messages) > 20:
                 print(f"  ... and {len(error.messages) - 20} more")
             print()
-            print("The model's raw response was saved to:")
-            print(f"  {error.response_path}")
-            print()
+            if error.saved_again:
+                print("The model's raw response was saved to:")
+                print(f"  {error.response_path}")
+                print()
             print("Rerun generate-spec to try again.")
             raise SystemExit(1)
 
@@ -1035,6 +1050,10 @@ def main():
         )
         print(f"Tasks generated: {len(spec['tasks'])}")
         print("Grading specification passed schema validation.")
+        filled = derived_presence_deliverables(spec)
+        if filled:
+            print(f"File-presence patterns filled in by AI Grader for "
+                  f"{len(filled)} deliverable(s): {', '.join(filled)}")
 
         print()
         print("Instructor review required before approval.")
