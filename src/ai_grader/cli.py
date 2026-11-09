@@ -44,6 +44,7 @@ from ai_grader.workflow_status import (
     StatusError, format_overview, format_project_status, project_status,
     projects_overview, resolve_status_target,
 )
+from ai_grader.workflow_continue import ContinueStopped, continue_project
 
 
 load_dotenv()
@@ -389,11 +390,33 @@ def main():
         help="Path to the project folder."
     )
 
+    # continue command
+    continue_parser = subparsers.add_parser(
+        "continue",
+        help=("Run every automatic step of the 5-stage workflow (set up, rubric, "
+              "grade, review grades, finalize) until you are needed, then say what "
+              "is needed."),
+    )
+    continue_parser.add_argument(
+        "project",
+        help="Project name (e.g. mspe_49600_fa26_prj3) or folder.",
+    )
+    continue_parser.add_argument(
+        "--approve",
+        action="store_true",
+        help=("Approve the rubric (after checking the review package with Claude) "
+              "and go on to grading."),
+    )
+    continue_parser.add_argument(
+        "--model",
+        help="Model for the AI steps. Default: OPENAI_MODEL.",
+    )
+
     # status command
     status_parser = subparsers.add_parser(
         "status",
-        help=("Where a project stands and the next step: every stage, done or "
-              "not, and the command to run next. Counts only, no student names."),
+        help=("Where a project stands: the 5 stages, done or not, and what comes "
+              "next. Counts only, no student names."),
     )
     status_parser.add_argument(
         "project",
@@ -975,6 +998,34 @@ def main():
                     "Review the final instructor summary and student feedback "
                     "before entering grades in Brightspace."
                 )
+
+    elif args.command == "continue":
+        try:
+            kind, target = resolve_status_target(args.project, Path.cwd())
+            if kind != "project":
+                raise StatusError("Name the project, for example: "
+                                  "python -m ai_grader continue mspe_49600_fa26_prj3")
+            print(describe_model(args.model))
+            print()
+            state = continue_project(target, approve=args.approve, model=args.model)
+        except StatusError as error:
+            print(f"continue: {error}")
+            raise SystemExit(1)
+        except ContinueStopped as error:
+            print()
+            print(f"Stopped: {error}")
+            print()
+            print(format_project_status(project_status(target)))
+            raise SystemExit(1)
+        except Exception as error:
+            if not is_api_error(error):
+                raise
+            print()
+            print("Stopped: the OpenAI API refused the request "
+                  f"({describe_api_error(error)}). Everything finished so far is kept; "
+                  "run continue again when the API is available.")
+            raise SystemExit(1)
+        print(format_project_status(state))
 
     elif args.command == "status":
         try:

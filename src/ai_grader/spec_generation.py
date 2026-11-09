@@ -395,10 +395,11 @@ def save_invalid_response(grader_path, text):
     return response_path
 
 
-def parse_and_validate_spec(text, schema):
+def parse_and_validate_spec(text, schema, policy=None):
     """
     Return the draft spec from the model's text, or raise ValueError with
-    the reasons it is unusable.
+    the reasons it is unusable. policy: the course policy settings
+    (course_policy.policy_settings) to enforce on the spec.
     """
 
     try:
@@ -410,6 +411,9 @@ def parse_and_validate_spec(text, schema):
 
     strip_schema_metadata(spec)
     fill_presence_patterns(spec)
+    if policy:
+        from ai_grader.course_policy import apply_policy
+        spec, _ = apply_policy(spec, policy)
     spec["status"] = "draft"
     spec.pop("approval", None)
     # Checks the schema first, then scoring totals and cross-references.
@@ -455,6 +459,9 @@ def generate_grading_spec(
     ) as file:
         schema = json.load(file)
 
+    from ai_grader.course_policy import policy_settings, policy_text
+    policy = policy_settings(policy_text(project_path))
+
     prompt = build_generation_prompt(
         project_path,
         sources,
@@ -473,7 +480,7 @@ def generate_grading_spec(
             raise FileNotFoundError(f"Saved response not found: {response_path}")
         output_text = response_path.read_text(encoding="utf-8-sig")
         try:
-            spec = parse_and_validate_spec(output_text, schema)
+            spec = parse_and_validate_spec(output_text, schema, policy)
         except (ValueError, KeyError, TypeError, StopIteration) as error:
             raise InvalidSpecResponseError(
                 validation_messages(error), response_path, saved_again=False
@@ -499,7 +506,7 @@ def generate_grading_spec(
             )
 
         try:
-            spec = parse_and_validate_spec(response.output_text, schema)
+            spec = parse_and_validate_spec(response.output_text, schema, policy)
         except (ValueError, KeyError, TypeError, StopIteration) as error:
             saved_path = save_invalid_response(grader_path, response.output_text)
             raise InvalidSpecResponseError(

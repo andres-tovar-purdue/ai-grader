@@ -23,17 +23,13 @@ from ai_grader.submission_processing import parse_brightspace_folder_name
 
 DONE, NEXT, TODO = "done", "next", "todo"
 
+# The 5 stages (key, title, the instructor's part).
 STAGES = [
-    ("setup", "Set up the project folder"),
-    ("files", "Add the assignment files"),
-    ("draft", "Draft the rubric"),
-    ("spec", "Review the drafts and generate the grading spec"),
-    ("approve", "Approve the grading spec"),
-    ("anonymize", "Anonymize the submissions"),
-    ("grade", "Grade the submissions"),
-    ("review", "Review the grades"),
-    ("finalize", "Finalize the grades"),
-    ("brightspace", "Enter the grades in Brightspace"),
+    ("setup", "Set up", "drop the files in the project folder"),
+    ("rubric", "Rubric", "check it with Claude, approve once"),
+    ("grade", "Grade", "none"),
+    ("review", "Review grades", "enter or confirm each grade"),
+    ("finalize", "Finalize", "enter the grades in Brightspace"),
 ]
 
 DRAFTS = {
@@ -92,7 +88,7 @@ def find_projects(projects_path):
         return []
     return sorted(
         (path for path in projects_path.iterdir()
-         if path.is_dir() and not path.name.startswith(".")),
+         if path.is_dir() and not path.name.startswith((".", "_"))),
         key=lambda path: path.name.lower(),
     )
 
@@ -200,39 +196,8 @@ def review_counts(review_path):
     return len(rows), filled
 
 
-def project_status(project_path, cwd=None):
-    """
-    The project's workflow stages (done / next / todo, each with a short
-    detail), warnings, and the next step with its command. Never contains
-    student names or submission folder names.
-    """
-
-    project_path = Path(project_path).resolve()
-    cwd = Path(cwd or Path.cwd()).resolve()
-    if not project_path.is_dir():
-        raise StatusError(f"Project folder does not exist: {project_path}")
-
-    name = project_path.name
-    shown = quoted(windows_path(project_path, cwd))
-    grader = project_path / "grader"
-    details = {key: "" for key, _ in STAGES}
-    done = {key: False for key, _ in STAGES}
+def _warnings_for_submissions(subs):
     warnings = []
-    next_step = None
-
-    def command(text):
-        return f"python -m ai_grader {text}"
-
-    # 1. Set up: standard folders and Brightspace submission folders.
-    missing = [folder for folder in PROJECT_SUBFOLDERS
-               if not (project_path / folder).is_dir()]
-    subs = submissions_summary(project_path / "submissions")
-    top_zips = [path for path in project_path.glob("*.zip") if path.is_file()]
-    details["setup"] = (
-        f"{counted(subs['attempt_folders'], 'submission folder')}, "
-        f"{counted(subs['students'], 'student')}"
-        + (", index.html" if subs["index_html"] else ", no index.html"))
-    done["setup"] = not missing and subs["attempt_folders"] > 0
     if subs["unrecognized_folders"]:
         number = subs["unrecognized_folders"]
         warnings.append(
@@ -251,202 +216,249 @@ def project_status(project_path, cwd=None):
             f"{counted(subs['loose_files'], 'file')} "
             f"{verb(subs['loose_files'], 'sits', 'sit')} directly in submissions\\. Only folders "
             "(and index.html) are read; put each student's files in their folder.")
-    if not done["setup"]:
-        if top_zips or missing:
-            next_step = ("Unpack the Brightspace download into the project folders.",
-                         command(f"init-project {quoted(name)}"))
-        else:
-            next_step = (f"Download the submissions from Brightspace and put the ZIP in "
-                         f"{shown} itself (not in a subfolder), then:",
-                         command(f"init-project {quoted(name)}"))
+    return warnings
 
-    # 2. Assignment files.
+
+def _mtime(path):
+    try:
+        return Path(path).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _checks_current(manifest, spec):
+    """Whether the prepared submissions' file-name checks used this specification."""
+    from ai_grader.submission_checks import spec_fingerprint
+    if not manifest or not spec:
+        return False
+    fingerprint = spec_fingerprint(spec)
+    submissions = manifest.get("submissions", [])
+    return bool(submissions) and all(
+        (item.get("deliverable_checks") or {}).get("spec_sha256") == fingerprint
+        for item in submissions)
+
+
+def project_state(project_path, cwd=None):
+    """
+    Everything status and continue need to know about a project: the facts,
+    the 5 stages (done / next / todo with a short detail), warnings, and the
+    next action, either automatic (continue does it) or the instructor's.
+    Never contains student names or submission folder names.
+    """
+    from ai_grader.course_policy import course_policy_path, project_policy_path
+    from ai_grader.project_setup import loose_instructor_files
+
+    project_path = Path(project_path).resolve()
+    cwd = Path(cwd or Path.cwd()).resolve()
+    if not project_path.is_dir():
+        raise StatusError(f"Project folder does not exist: {project_path}")
+    name = project_path.name
+    shown = quoted(windows_path(project_path, cwd))
+    grader = project_path / "grader"
+    facts = {}
+    warnings = []
+
+    # Stage 1: set up.
+    missing = [folder for folder in PROJECT_SUBFOLDERS if not (project_path / folder).is_dir()]
+    subs = submissions_summary(project_path / "submissions")
+    top_zips = [path.name for path in project_path.glob("*.zip") if path.is_file()]
+    loose = loose_instructor_files(project_path)
     drafts = {label: project_path / relative for label, relative in DRAFTS.items()}
     readable = count_files(project_path / "project", SUPPORTED_PROJECT_EXTENSIONS,
                            exclude={drafts["project instructions"]})
-    all_files = count_files(project_path / "project",
-                            exclude={drafts["project instructions"]})
-    ignored = all_files - readable
-    datasets = count_files(project_path / "datasets", {".csv"})
-    details["files"] = (
-        f"{counted(readable, 'assignment file')} in project\\"
-        + (f" ({ignored} ignored: only PDF, .md and .txt are read)" if ignored else "")
-        + f", {counted(datasets, 'CSV dataset')}")
-    done["files"] = readable > 0
-    if next_step is None and not done["files"]:
-        next_step = (f"Put the assignment PDF in {shown}\\project\\ and any datasets "
-                     "in datasets\\, then:",
-                     command(f"prepare-project {shown}"))
+    ignored = count_files(project_path / "project",
+                          exclude={drafts["project instructions"]}) - readable
+    datasets = count_files(project_path / "datasets")
+    warnings += _warnings_for_submissions(subs)
+    if ignored:
+        warnings.append(f"{counted(ignored, 'file')} in project\\ {verb(ignored, 'is', 'are')} "
+                        "not read (only PDF, .md and .txt are): save Word documents and "
+                        "notebooks as PDF if the rubric needs them.")
+    policy_installed = project_policy_path(project_path).is_file()
+    facts.update(submissions=subs, assignment_files=readable, datasets=datasets,
+                 loose_files=loose, top_zips=top_zips, missing_folders=missing,
+                 policy=policy_installed, course_policy=course_policy_path(project_path).is_file())
+    has_spec = grader.is_dir() and any(grader.glob("grading_spec_v*.json"))
+    setup_pending = bool(missing or loose or (top_zips and not subs["attempt_folders"])
+                         or (facts["course_policy"] and not policy_installed and not has_spec))
+    setup_done = not setup_pending and subs["attempt_folders"] > 0 and readable > 0
+    setup_detail = (f"{counted(subs['students'], 'student')}, "
+                    f"{counted(readable, 'assignment file')}, "
+                    f"{counted(datasets, 'dataset')}"
+                    + (", course policy" if policy_installed else ""))
 
-    # 3-5. Drafts, spec, approval.
+    # Stage 2: rubric.
     present = [label for label, path in drafts.items() if path.is_file()]
-    done["draft"] = len(present) == len(drafts)
-    details["draft"] = f"{len(present)} of {len(drafts)} drafts"
     specs = list(grader.glob("grading_spec_v*.json")) if grader.is_dir() else []
     spec_path = latest(specs, SPEC_PATTERN)
     spec = read_json(spec_path) if spec_path else None
     spec_status = (spec or {}).get("status")
-    done["spec"] = spec_path is not None
-    done["approve"] = spec_status == "approved"
-    if spec_path:
-        unresolved = [item for item in (spec or {}).get("known_ambiguities", [])
-                      if item.get("status") == "unresolved"]
-        details["spec"] = spec_path.name
-        details["approve"] = f"{spec_path.name}: {spec_status or 'unreadable'}" + (
-            f", {counted(len(unresolved), 'unresolved question')}"
-            if unresolved and spec_status != "approved" else "")
-    if next_step is None and not done["draft"]:
-        if present:
-            warnings.append(
-                f"Only {len(present)} of the 3 rubric drafts exist; prepare-project "
-                "refuses to overwrite drafts. Ask the instructor before removing them.")
-        next_step = ("Draft the rubric (one AI request; no student work is read).",
-                     command(f"prepare-project {shown}"))
-    if next_step is None and not done["spec"]:
-        next_step = ("The instructor reviews and edits the three drafts "
-                     "(project\\project_instructions.md, rubric\\instructor_rubric.md, "
-                     "reference\\reference_solution.md); then generate the grading spec:",
-                     command(f"generate-spec {shown}"))
-    if next_step is None and not done["approve"]:
-        next_step = ("After the instructor says the rubric is final, approve the spec:",
-                     command("approve-spec " + quoted(windows_path(spec_path, cwd), True)))
+    unresolved = [item for item in (spec or {}).get("known_ambiguities", [])
+                  if item.get("status") == "unresolved"]
+    reviewed = grader / "grading_spec_reviewed.json"
+    reviewed_pending = reviewed.is_file() and _mtime(reviewed) > _mtime(spec_path)
+    rubric_sources = [path for path in drafts.values() if path.is_file()]
+    if policy_installed:
+        rubric_sources.append(project_policy_path(project_path))
+    rubric_changed = bool(spec_path) and any(_mtime(path) > _mtime(spec_path) + 1
+                                             for path in rubric_sources)
+    packages = sorted(grader.glob("review_package_v*.zip")) if grader.is_dir() else []
+    package = packages[-1] if packages else None
+    facts.update(drafts=len(present), spec=spec_path.name if spec_path else None,
+                 spec_status=spec_status, unresolved=len(unresolved),
+                 reviewed_spec_waiting=reviewed_pending, rubric_changed=rubric_changed,
+                 review_package=package.name if package else None)
+    rubric_done = spec_status == "approved" and not reviewed_pending and not rubric_changed
+    rubric_detail = (f"{spec_path.name}: {spec_status}" if spec_path
+                     else f"{len(present)} of 3 drafts")
+    if unresolved and spec_status != "approved":
+        rubric_detail += f", {counted(len(unresolved), 'open question')}"
 
-    # 6. Anonymized submissions.
+    # Stage 3: grade.
     manifest = read_json(grader / "submission_manifest.json")
-    prepared = (manifest is not None
-                and (grader / "student_map.json").is_file()
+    prepared = (manifest is not None and (grader / "student_map.json").is_file()
                 and (grader / "anonymized_submissions").is_dir())
-    done["anonymize"] = prepared
     runs_path = grader / "grading_runs"
     runs = [path for path in runs_path.iterdir() if path.is_dir()] if runs_path.is_dir() else []
     run_path = latest(runs, RUN_PATTERN)
-    if prepared:
-        prepared_count = manifest.get("submission_count", 0)
-        details["anonymize"] = counted(prepared_count, "student")
-        if manifest.get("unparsed_folder_count"):
-            details["anonymize"] += (
-                f", {counted(manifest['unparsed_folder_count'], 'folder')} skipped")
-        if subs["students"] != prepared_count:
-            redo = (command(f"prepare-submissions {shown}") if run_path is None else
-                    "archive-grading first (ask the instructor), then prepare-submissions")
-            warnings.append(
-                f"submissions\\ now has {counted(subs['students'], 'student')}, but "
-                f"{prepared_count} {verb(prepared_count, 'was', 'were')} anonymized. "
-                f"To include the change: {redo}.")
-    if next_step is None and not done["anonymize"]:
-        next_step = ("Anonymize the submissions (names removed; no AI request).",
-                     command(f"prepare-submissions {shown}"))
-
-    # 7. Grading runs.
     run = read_json(run_path / "grading_results.json") if run_path else None
-    if run_path and run is not None:
-        results = run.get("results", [])
-        invalid = sum(1 for item in results
-                      if item.get("validation_status") == "invalid_model_response")
-        details["grade"] = (f"{run_path.name}: {counted(len(results), 'student')}, "
-                            f"model {run.get('model', 'unknown')}"
-                            + (f", {invalid} not scored" if invalid else ""))
-        stale_spec = (spec_path is not None and done["approve"]
-                      and run.get("grading_spec") not in (None, spec_path.name))
-        done["grade"] = not invalid and not stale_spec
-        if next_step is None and stale_spec:
-            next_step = (f"{run_path.name} used {run.get('grading_spec')}, but "
-                         f"{spec_path.name} is now approved. Grade again (a new run is "
-                         "written; earlier runs are kept):",
-                         command(f"grade-submissions {shown}"))
-        elif next_step is None and invalid:
-            next_step = (f"{counted(invalid, 'student')} {verb(invalid, 'was', 'were')} "
-                         "not scored. Request only those again:",
-                         command(f"grade-submissions {shown} --resume --retry-failed"))
-    elif run_path:
-        details["grade"] = f"{run_path.name}: grading_results.json unreadable"
-    if next_step is None and not done["grade"]:
-        next_step = ("Grade the submissions (one AI request per student).",
-                     command(f"grade-submissions {shown}"))
-
-    # 8. Review file for the latest run.
+    prepared_count = (manifest or {}).get("submission_count", 0)
+    added_after = prepared and subs["students"] != prepared_count
+    checks_current = prepared and _checks_current(manifest, spec if rubric_done else None)
+    results = (run or {}).get("results", [])
+    invalid = sum(1 for item in results
+                  if item.get("validation_status") == "invalid_model_response")
+    stale_run = bool(run) and rubric_done and run.get("grading_spec") not in (None, spec_path.name)
     reviews = list(run_path.glob("instructor_review_v*.csv")) if run_path else []
     review_path = latest(reviews, REVIEW_PATTERN)
-    if review_path:
-        counts = review_counts(review_path)
-        if counts is None:
-            details["review"] = f"{review_path.name}: can't be read"
-            warnings.append(
-                f"{review_path.name} can't be read. Save it in Excel with "
-                "File > Save As > CSV UTF-8.")
-        else:
-            total, filled = counts
-            details["review"] = f"{review_path.name}: {filled} of {total} grades entered"
-            done["review"] = total > 0 and filled == total
-    review_shown = windows_path(review_path, cwd) if review_path else None
-    if next_step is None and not done["review"]:
-        if review_path is None:
-            next_step = ("Create the review spreadsheet (the AI grade next to a blank "
-                         "column for the instructor's grade):",
-                         command(f"generate-report {shown} --run {run_path.name} --open"))
-        else:
-            next_step = (f"Open {quoted(review_shown)}, enter total_instructor_score for every "
-                         "student (copy the AI grade where you agree), and save as CSV "
-                         "UTF-8. Apply any late penalty there. Then run status again.",
-                         None)
+    facts.update(prepared=prepared, prepared_students=prepared_count, checks_current=checks_current,
+                 run=run_path.name if run_path else None, model=(run or {}).get("model"),
+                 graded=len(results), not_scored=invalid, stale_run=stale_run,
+                 review_file=review_path.name if review_path else None)
+    if added_after:
+        warnings.append(
+            f"submissions\\ now has {counted(subs['students'], 'student')}, but "
+            f"{prepared_count} {verb(prepared_count, 'was', 'were')} anonymized."
+            + (" continue prepares them again before grading." if not run_path else
+               " Grading has started: to include the change, set the runs aside with "
+               f"python -m ai_grader archive-grading {shown} (ask the instructor), then continue."))
+    grade_done = (rubric_done and prepared and not added_after and bool(run) and not invalid
+                  and not stale_run and review_path is not None)
+    grade_detail = (f"{run_path.name}: {counted(len(results), 'student')}, model "
+                    f"{(run or {}).get('model', 'unknown')}"
+                    + (f", {invalid} not scored" if invalid else "")
+                    + ("" if review_path else ", review sheet not written yet")
+                    if run_path and run is not None else
+                    (f"{counted(prepared_count, 'student')} anonymized" if prepared else ""))
 
-    # 9. Finalization of the latest run.
+    # Stage 4: review grades.
+    counts = review_counts(review_path) if review_path else None
+    if review_path and counts is None:
+        warnings.append(f"{review_path.name} can't be read. Save it in Excel with "
+                        "File > Save As > CSV UTF-8.")
+    total, filled = counts or (0, 0)
+    review_done = grade_done and counts is not None and total > 0 and filled == total
+    review_detail = (f"{review_path.name}: {filled} of {total} grades entered"
+                     if counts else (f"{review_path.name}: can't be read" if review_path else ""))
+
+    # Stage 5: finalize.
     finals_path = grader / "finalizations" / run_path.name if run_path else None
     finals = ([path for path in finals_path.iterdir() if path.is_dir()]
               if finals_path and finals_path.is_dir() else [])
     final_path = latest(finals, FINALIZATION_PATTERN)
-    done["finalize"] = final_path is not None
-    if final_path:
-        details["finalize"] = final_path.name
-        final_csv = final_path / FINAL_CSV_FILENAME
-        if (review_path and final_csv.is_file()
-                and review_path.stat().st_mtime > final_csv.stat().st_mtime):
-            warnings.append(
-                f"{review_path.name} was changed after {final_path.name}. If grades or "
-                "comments changed, finalize again (a new finalization is written).")
-    if next_step is None and not done["finalize"]:
-        next_step = ("Finalize: writes the final grades, comments and Brightspace files.",
-                     command(f"finalize-grading {shown} --run {run_path.name} "
-                             f"--scores-file {quoted(review_shown, True)}"))
+    final_csv = final_path / FINAL_CSV_FILENAME if final_path else None
+    final_stale = bool(final_csv and review_path and final_csv.is_file()
+                       and _mtime(review_path) > _mtime(final_csv))
+    finalize_done = review_done and final_path is not None and not final_stale
+    facts.update(finalization=final_path.name if final_path else None, final_stale=final_stale)
+    finalize_detail = (final_path.name + (" (review sheet changed since)" if final_stale else "")
+                       if final_path else "")
 
-    # 10. Brightspace: the instructor's step; AI Grader can't see it.
-    if final_path:
+    # The next action.
+    def you(text, command=None):
+        return {"who": "you", "text": text, "command": command}
+
+    def auto(key, text):
+        return {"who": "continue", "key": key, "text": text,
+                "command": f"python -m ai_grader continue {quoted(name)}"}
+
+    if not setup_done:
+        if setup_pending:
+            action = auto("setup", "Sort the files you added into the project folders.")
+        elif not subs["attempt_folders"]:
+            action = you(f"Put the Brightspace download ZIP in {shown} (top level, not in a "
+                         "subfolder), then run continue.",
+                         f"python -m ai_grader continue {quoted(name)}")
+        else:
+            action = you(f"Put the assignment PDF (and any datasets and your solution) in "
+                         f"{shown}, then run continue.",
+                         f"python -m ai_grader continue {quoted(name)}")
+    elif not rubric_done:
+        if not present:
+            action = auto("draft", "Draft the rubric and the grading specification "
+                                   "(two AI requests), then write the review package.")
+        elif len(present) < 3:
+            action = you(f"Only {len(present)} of the 3 rubric drafts exist. Remove the "
+                         "incomplete drafts (ask the instructor) and run continue to draft "
+                         "them again.")
+        elif reviewed_pending:
+            action = auto("install_reviewed", "Check and install the reviewed grading "
+                                              "specification (no AI request).")
+        elif not spec_path or rubric_changed:
+            action = auto("spec", "Generate the grading specification from the rubric "
+                                  "(one AI request) and write the review package.")
+        else:
+            package_text = (f"grader\\{package.name}" if package
+                            else "the review package")
+            action = you(
+                f"Check the rubric: upload {package_text} (no student data) to Claude and "
+                "save any corrected files it returns as it says. When you are satisfied, "
+                "approve it:" + (f" ({counted(len(unresolved), 'open question')} to settle "
+                                 "first)" if unresolved else ""),
+                f"python -m ai_grader continue {quoted(name)} --approve")
+    elif subs["unrecognized_folders"]:
+        action = you("Rename the submission folders listed under Needs attention, then "
+                     "run continue.", f"python -m ai_grader continue {quoted(name)}")
+    elif added_after and run_path:
+        action = you("A student was added after grading started; see Needs attention.")
+    elif not grade_done:
+        action = auto("grade", "Anonymize the submissions, grade them (one AI request per "
+                               "student, failed ones retried once) and write your review "
+                               "sheet.")
+    elif not review_done:
+        review_shown = quoted(windows_path(review_path, cwd))
+        action = you(f"Open {review_shown} and enter your grade in total_instructor_score "
+                     "for every student (copy the AI grade where you agree; put a late "
+                     "penalty in the grade and 'Late submission' in adjustment_reason). Check "
+                     "deductions and final_comment, save as CSV UTF-8, then run continue.",
+                     f"python -m ai_grader continue {quoted(name)}")
+    elif not finalize_done:
+        action = auto("finalize", "Write the final grades, comments and Brightspace files.")
+    else:
         final_shown = windows_path(final_path, cwd)
-        imported = (final_path / GRADES_IMPORT_FILENAME).is_file()
-        details["brightspace"] = ("grades import file ready" if imported
-                                  else "your step")
-        if next_step is None:
-            next_step = (f"Enter the grades in Brightspace from {final_shown}\\"
-                         f"{FINAL_CSV_FILENAME}"
-                         + (f" (or import {GRADES_IMPORT_FILENAME})" if imported else "")
-                         + f" and paste each comment from {FEEDBACK_TEXT_FILENAME}. "
-                         "The instructor decides when grades are released.", None)
+        action = you(f"Enter the grades in Brightspace from {final_shown}\\"
+                     f"{FINAL_CSV_FILENAME} (Grade and Comment columns) and publish when you "
+                     "are ready. AI Grader never uploads or releases grades.")
 
-    stages = []
-    current = None
-    for key, title in STAGES:
-        if key == "brightspace":
-            state = NEXT if final_path and current is None else TODO
-        elif done[key]:
+    done = [setup_done, rubric_done, grade_done, review_done, finalize_done]
+    details = [setup_detail, rubric_detail, grade_detail, review_detail, finalize_detail]
+    stages, current = [], None
+    for (key, title, role), is_done, detail in zip(STAGES, done, details):
+        if is_done:
             state = DONE
         elif current is None:
-            state = NEXT
+            state, current = NEXT, key
         else:
             state = TODO
-        if state == NEXT and current is None:
-            current = key
-        stages.append({"key": key, "title": title, "state": state,
-                       "detail": details[key]})
+        stages.append({"key": key, "title": title, "your_part": role, "state": state,
+                       "detail": detail})
+    return {"project": name, "project_path": str(project_path), "current_stage": current,
+            "stages": stages, "warnings": warnings, "next": action, "facts": facts}
 
-    action, next_command = next_step
-    return {
-        "project": name,
-        "project_path": str(project_path),
-        "current_stage": current,
-        "stages": stages,
-        "warnings": warnings,
-        "next": {"action": action, "command": next_command},
-    }
+
+def project_status(project_path, cwd=None):
+    """Earlier name of project_state."""
+    return project_state(project_path, cwd)
 
 
 def projects_overview(projects_path, cwd=None):
@@ -454,13 +466,14 @@ def projects_overview(projects_path, cwd=None):
 
     overview = []
     for path in find_projects(projects_path):
-        status = project_status(path, cwd)
+        status = project_state(path, cwd)
         number = next((index for index, stage in enumerate(status["stages"], start=1)
                        if stage["key"] == status["current_stage"]), None)
         title = next((stage["title"] for stage in status["stages"]
                       if stage["key"] == status["current_stage"]), "")
         overview.append({"project": path.name, "step": number, "of": len(STAGES),
-                         "title": title, "warnings": len(status["warnings"])})
+                         "title": title, "waiting_for": status["next"]["who"],
+                         "warnings": len(status["warnings"])})
     return overview
 
 
@@ -471,28 +484,38 @@ def format_project_status(status):
     lines = ["", f"Project: {status['project']}", ""]
     for number, stage in enumerate(status["stages"], start=1):
         detail = f": {stage['detail']}" if stage["detail"] else ""
-        lines.append(f"  {MARKS[stage['state']]} {number:>2}. {stage['title']}{detail}")
+        lines.append(f"  {MARKS[stage['state']]} {number}. {stage['title']}{detail}")
     if status["warnings"]:
         lines += ["", "Needs attention:"]
         lines += [f"  - {warning}" for warning in status["warnings"]]
-    lines += ["", "Next step: " + status["next"]["action"]]
-    if status["next"]["command"]:
-        lines += ["", "  " + status["next"]["command"]]
+    action = status["next"]
+    if action["who"] == "continue":
+        lines += ["", f"Next: AI Grader will {action['text'][0].lower()}{action['text'][1:]}",
+                  "", "  " + action["command"]]
+    else:
+        lines += ["", "Your turn: " + action["text"]]
+        if action.get("command"):
+            lines += ["", "  " + action["command"]]
     return "\n".join(lines)
 
 
 def format_overview(projects_path, overview):
     if not overview:
-        return (f"\nNo projects in {projects_path} yet. Start one with:\n\n"
-                "  python -m ai_grader init-project PROJECT_ID")
+        return (f"\nNo projects in {projects_path} yet. Create a folder for one in "
+                "projects\\, drop the Brightspace ZIP and the assignment PDF in it, and run:"
+                "\n\n  python -m ai_grader continue PROJECT_ID")
     width = max(len(item["project"]) for item in overview)
     lines = ["", f"Projects in {projects_path}:", ""]
     for item in overview:
-        where = f"step {item['step']} of {item['of']}: {item['title']}"
+        if item["step"] is None:
+            where = "done: enter the grades in Brightspace"
+        else:
+            whose = "your turn" if item["waiting_for"] == "you" else "run continue"
+            where = f"stage {item['step']} of {item['of']}: {item['title']} ({whose})"
         attention = (f"  ({counted(item['warnings'], 'item')} "
                      f"{verb(item['warnings'], 'needs', 'need')} attention)"
                      if item["warnings"] else "")
         lines.append(f"  {item['project']:<{width}}  {where}{attention}")
-    lines += ["", "Details and the next command for one project:", "",
+    lines += ["", "Details and the next step for one project:", "",
               "  python -m ai_grader status PROJECT_ID"]
     return "\n".join(lines)

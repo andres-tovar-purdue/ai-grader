@@ -48,13 +48,25 @@ Finalize grades and feedback
 
 A useful rule is:
 
-> **When in doubt, run `status`.**
+> **Two commands do almost everything: `status` and `continue`.**
+
+Grading runs in 5 stages. You act at three points; AI Grader does the rest.
+
+| # | Stage | What AI Grader does | Your part |
+|---|---|---|---|
+| 1 | Set up | Sorts the files you drop in the project folder; unpacks the Brightspace ZIP; copies in the course grading policy | Drop the ZIP, assignment PDF, datasets and your solution in `projects\PROJECT_ID\` |
+| 2 | Rubric | Drafts the rubric, instructions and reference solution, generates the grading specification (course policy enforced) and writes a review package without student data | Check the package with Claude, then approve once |
+| 3 | Grade | Anonymizes, downloads repositories, grades (failed students asked again once), writes your review sheet | None |
+| 4 | Review grades | — | Enter or confirm each grade in the review sheet |
+| 5 | Finalize | Writes the final grades, itemized comments and Brightspace files | Enter the grades in Brightspace |
 
 ```powershell
-python -m ai_grader status PROJECT_ID
+python -m ai_grader continue PROJECT_ID             # runs every automatic step, stops when you are needed
+python -m ai_grader continue PROJECT_ID --approve   # after checking the rubric: approve and grade
+python -m ai_grader status PROJECT_ID               # where the project stands (counts only, safe to share)
 ```
 
-`status` lists every stage of the grading workflow (done, next, not yet), what needs attention, and the exact next command. It reads only, prints counts rather than student names, and can be pasted into a chat when asking for help. Without a project name it lists every project and its current step.
+`continue` runs the same commands described in the rest of this manual, in order, and stops at each checkpoint with exactly what it needs from you. Everything stays versioned; nothing is overwritten. `status` changes nothing, makes no AI request and prints counts, never student names; without a project name it lists every project and its stage. The individual commands remain available for advanced use and automation.
 
 ---
 
@@ -218,6 +230,26 @@ Do **not** commit `.env` to Git or share the API key.
 
 # Part II — Starting a New Grading Project
 
+## 9a. The Short Way: continue
+
+1. Create `projects\PROJECT_ID\` (for example `mspe_49600_fa26_prj3`) and put in it, at the top level: the Brightspace download ZIP, the assignment PDF, any datasets, and your own solution if you have one (PDF; Word files and notebooks are moved to `project\` but not read).
+2. Run `python -m ai_grader continue PROJECT_ID`. AI Grader sorts the files, drafts the rubric and the grading specification (two AI requests) and writes `grader\review_package_v001.zip`, which holds no student data.
+3. Upload the package to Claude. Save any corrected files it returns where it says: Markdown drafts over the ones in `project\`, `rubric\` or `reference\`; a corrected specification as `grader\grading_spec_reviewed.json`. If you changed a Markdown draft yourself, run `continue` once more to regenerate the specification.
+4. Run `python -m ai_grader continue PROJECT_ID --approve`. AI Grader records your approval, then anonymizes, grades and writes your review sheet.
+5. Fill in the review sheet (Section 22), save it as CSV UTF-8, and run `continue` again. It writes the final grades and comments.
+6. Enter the grades in Brightspace (Section 24).
+
+**Course grading policy.** A course's standing decisions (for example, "every attempted item keeps at least half its points") live in `projects\_policies\COURSE.md`, where COURSE is the start of the project name (`mspe_49600`). Set-up copies it to the project's `rubric\grading_policy.md`; the rubric drafting and the specification read it, and two settings are enforced in code:
+
+```text
+minimum_attempted_fraction: 0.5   every attempted rubric item keeps at least this share of its points
+point_step: 0.5                   deductions are shown to students in steps of this size
+```
+
+With `minimum_attempted_fraction`, each item deduction in the specification becomes an "attempted but incomplete or incorrect" rule (the item's points × (1 − fraction)) and a "completely missing" rule (all of the item's points).
+
+---
+
 ## 10. Initialize a Project
 
 Run AI Grader from the workspace root:
@@ -359,42 +391,29 @@ Do not rename the Brightspace folders before running submission preparation.
 
 ## 12. Check Where the Project Stands
 
-After copying the inputs, and at any time later, run from the workspace:
+At any time, from the workspace:
 
 ```powershell
-python -m ai_grader status mspe_49600_fa26_pr01
+python -m ai_grader status mspe_49600_fa26_prj3
 ```
 
 Example output:
 
 ```text
-Project: mspe_49600_fa26_pr01
+Project: mspe_49600_fa26_prj3
 
-  [done]  1. Set up the project folder: 5 submission folders, 5 students, index.html
-  [done]  2. Add the assignment files: 1 assignment file in project\, 1 CSV dataset
-  [next]  3. Draft the rubric: 0 of 3 drafts
-  [    ]  4. Review the drafts and generate the grading spec
-  [    ]  5. Approve the grading spec
-  [    ]  6. Anonymize the submissions
-  [    ]  7. Grade the submissions
-  [    ]  8. Review the grades
-  [    ]  9. Finalize the grades
-  [    ] 10. Enter the grades in Brightspace
+  [done] 1. Set up: 5 students, 1 assignment file, 1 dataset, course policy
+  [next] 2. Rubric: grading_spec_v001.json: draft
+  [    ] 3. Grade
+  [    ] 4. Review grades
+  [    ] 5. Finalize
 
-Next step: Draft the rubric (one AI request; no student work is read).
+Your turn: Check the rubric: upload grader\review_package_v001.zip (no student data) to Claude and save any corrected files it returns as it says. When you are satisfied, approve it:
 
-  python -m ai_grader prepare-project .\projects\mspe_49600_fa26_pr01
+  python -m ai_grader continue mspe_49600_fa26_prj3 --approve
 ```
 
-The project can be given by name (as above) or as a path. Without one, `status` lists every project in `projects\` with its current step; run inside a project folder, it reports on that project.
-
-Under **Needs attention**, `status` also reports problems it can see before they cost a step, for example:
-
-- a folder in `submissions\` that is not named like a Brightspace submission (it would be skipped; see "Late or emailed submissions" in Section 18);
-- a submission date AI Grader cannot read;
-- files in `project\` that are ignored (only PDF, Markdown and text files are read);
-- a student added to `submissions\` after the submissions were anonymized;
-- a review file changed after the grades were finalized.
+When the next step is automatic, `status` says what AI Grader will do and shows the `continue` command. Under **Needs attention** it reports problems before they cost a step: a submission folder not named like Brightspace's (it would be skipped; see "Late or emailed submissions" in Section 18), a submission date it can't read, files in `project\` that are not read, a student added after anonymizing, a review sheet that can't be read.
 
 `status` changes nothing, makes no AI request, and prints counts, versions and AI Grader's own file names, never student names, usernames or submission folder names. `--json` prints the same information for scripts and assistants.
 
@@ -1024,10 +1043,16 @@ python -m ai_grader init-project PROJECT_ID
 Create a new local grading project, or complete an existing project folder that holds a Brightspace ZIP or its extracted folders. Add `--dry-run` to preview the changes without making them.
 
 ```text
+python -m ai_grader continue PROJECT_ID [--approve]
+```
+
+Run every automatic step of the 5-stage workflow until you are needed (Section 9a). `--approve` approves the rubric after you checked it, then grading follows.
+
+```text
 python -m ai_grader status [PROJECT_ID]
 ```
 
-Show every workflow stage (done, next, not yet), what needs attention, and the next command. Without a project, list every project and its current step. Read-only; counts only, no student names. Add `--json` for machine-readable output.
+Show the 5 stages (done, next, not yet), what needs attention, and what comes next. Without a project, list every project and its stage. Read-only; counts only, no student names. Add `--json` for machine-readable output.
 
 ```text
 python -m ai_grader inspect PROJECT_PATH
