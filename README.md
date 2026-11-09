@@ -40,6 +40,17 @@ stays out of Git; `projects/` is also in `.gitignore`.
 `projects\` folder and API connection. See [USER_MANUAL.md](USER_MANUAL.md) for the
 full workflow.
 
+To see where a project stands and the next command at any time:
+
+```powershell
+python -m ai_grader status mspe_49600_fa26_prj2
+```
+
+`status` lists every workflow stage (done, next, not yet), what needs attention (for
+example a submission folder that would be skipped) and the exact next command. It
+changes nothing and prints counts only, never student names. Without a project name
+it lists every project and its current step; `--json` gives the same for scripts.
+
 ## Human-Supervised Grading Workflow
 
 The grader combines deterministic processing, AI-assisted rubric evaluation, and instructor review. AI-generated assessments remain preliminary until the instructor verifies the evidence and approves the final scores and feedback.

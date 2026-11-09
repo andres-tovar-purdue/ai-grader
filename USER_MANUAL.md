@@ -48,9 +48,13 @@ Finalize grades and feedback
 
 A useful rule is:
 
-> **When in doubt, run `inspect`.**
+> **When in doubt, run `status`.**
 
-The `inspect` command reports the current project contents, identifies the workflow stage, tells the user what should be reviewed, and prints the next command to run.
+```powershell
+python -m ai_grader status PROJECT_ID
+```
+
+`status` lists every stage of the grading workflow (done, next, not yet), what needs attention, and the exact next command. It reads only, prints counts rather than student names, and can be pasted into a chat when asking for help. Without a project name it lists every project and its current step.
 
 ---
 
@@ -353,25 +357,48 @@ Do not rename the Brightspace folders before running submission preparation.
 
 ---
 
-## 12. Inspect the Project
+## 12. Check Where the Project Stands
 
-After copying the inputs, run:
-
-```powershell
-python -m ai_grader inspect .\projects\PROJECT_ID
-```
-
-For example:
+After copying the inputs, and at any time later, run from the workspace:
 
 ```powershell
-python -m ai_grader inspect .\projects\mspe_49600_fa26_pr01
+python -m ai_grader status mspe_49600_fa26_pr01
 ```
 
-`inspect` lists the files in the project folders and determines the current workflow stage.
+Example output:
 
-At the end of the output, AI Grader prints the current workflow status, what the user should verify or review, and the next command to run.
+```text
+Project: mspe_49600_fa26_pr01
 
-This command can be used at any time to determine where a project is in the grading workflow.
+  [done]  1. Set up the project folder: 5 submission folders, 5 students, index.html
+  [done]  2. Add the assignment files: 1 assignment file in project\, 1 CSV dataset
+  [next]  3. Draft the rubric: 0 of 3 drafts
+  [    ]  4. Review the drafts and generate the grading spec
+  [    ]  5. Approve the grading spec
+  [    ]  6. Anonymize the submissions
+  [    ]  7. Grade the submissions
+  [    ]  8. Review the grades
+  [    ]  9. Finalize the grades
+  [    ] 10. Enter the grades in Brightspace
+
+Next step: Draft the rubric (one AI request; no student work is read).
+
+  python -m ai_grader prepare-project .\projects\mspe_49600_fa26_pr01
+```
+
+The project can be given by name (as above) or as a path. Without one, `status` lists every project in `projects\` with its current step; run inside a project folder, it reports on that project.
+
+Under **Needs attention**, `status` also reports problems it can see before they cost a step, for example:
+
+- a folder in `submissions\` that is not named like a Brightspace submission (it would be skipped; see "Late or emailed submissions" in Section 18);
+- a submission date AI Grader cannot read;
+- files in `project\` that are ignored (only PDF, Markdown and text files are read);
+- a student added to `submissions\` after the submissions were anonymized;
+- a review file changed after the grades were finalized.
+
+`status` changes nothing, makes no AI request, and prints counts, versions and AI Grader's own file names, never student names, usernames or submission folder names. `--json` prints the same information for scripts and assistants.
+
+`inspect` is the older, more detailed view: it also lists every file in the project folders, including submission folders whose names contain student names, so do not paste its output into a chat or email.
 
 ---
 
@@ -563,6 +590,16 @@ Brightspace creates one folder per attempt. AI Grader builds each student's subm
 - If an attempt's time cannot be read from its folder name, that attempt is treated as the oldest, and the student is flagged.
 
 You can rerun `prepare-submissions` until grading starts, for example after adding a late submission. It builds and validates the new output first, then replaces the earlier `anonymized_submissions\`, `submission_manifest.json`, `student_map.json` and repository evidence. Once grading has started (anything in `grader\grading_runs\` or `grader\debug_responses\`), it refuses and changes nothing, because those files refer to the current `Student_###` numbers.
+
+### Late or emailed submissions
+
+A submission that did not come in the Brightspace download (for example, one received by email) must be named like a Brightspace folder; otherwise `prepare-submissions` skips it and warns that a folder could not be parsed (`status` reports it earlier). Put the student's files in one folder inside `submissions\` named:
+
+```text
+999999-999999 - USERNAME First Last - Oct 12, 2026 900 PM
+```
+
+Any two numbers joined by a hyphen; the student's Brightspace username and full name as on the class list (the username is the key for the Brightspace grades import); and the time they submitted, written as Brightspace writes it (month name, no colon in the time). That time is used for their GitHub repository snapshot. AI Grader does not apply late penalties: the instructor applies them in `total_instructor_score` during review.
 
 ### GitHub repositories linked in submissions
 
@@ -912,13 +949,13 @@ Open a terminal and activate the environment:
 .\ai-grader\.venv\Scripts\Activate.ps1
 ```
 
-Then inspect the project:
+Then check where the project stands:
 
 ```powershell
-python -m ai_grader inspect .\projects\PROJECT_ID
+python -m ai_grader status PROJECT_ID
 ```
 
-AI Grader should identify the current workflow stage and print the next command.
+AI Grader lists every stage, marks the next one, and prints the next command. Without a project name it lists every project and its current step.
 
 This is the preferred way to resume an unfinished grading project.
 
@@ -965,10 +1002,16 @@ python -m ai_grader init-project PROJECT_ID
 Create a new local grading project, or complete an existing project folder that holds a Brightspace ZIP or its extracted folders. Add `--dry-run` to preview the changes without making them.
 
 ```text
+python -m ai_grader status [PROJECT_ID]
+```
+
+Show every workflow stage (done, next, not yet), what needs attention, and the next command. Without a project, list every project and its current step. Read-only; counts only, no student names. Add `--json` for machine-readable output.
+
+```text
 python -m ai_grader inspect PROJECT_PATH
 ```
 
-Inspect the project and determine the current workflow stage.
+List the project's files and determine the current workflow stage. The listing includes submission folder names (student names); prefer `status` when sharing output.
 
 ```text
 python -m ai_grader manifest PROJECT_PATH

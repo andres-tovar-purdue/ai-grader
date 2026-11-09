@@ -38,6 +38,10 @@ from ai_grader.submission_processing import (
     SubmissionsAlreadyGradedError, previous_preparation_paths, write_submission_manifest,
 )
 from ai_grader.submission_checks import refresh_submission_checks
+from ai_grader.workflow_status import (
+    StatusError, format_overview, format_project_status, project_status,
+    projects_overview, resolve_status_target,
+)
 
 
 load_dotenv()
@@ -381,6 +385,24 @@ def main():
     inspect_parser.add_argument(
         "project_path",
         help="Path to the project folder."
+    )
+
+    # status command
+    status_parser = subparsers.add_parser(
+        "status",
+        help=("Where a project stands and the next step: every stage, done or "
+              "not, and the command to run next. Counts only, no student names."),
+    )
+    status_parser.add_argument(
+        "project",
+        nargs="?",
+        help=("Project name (e.g. mspe_49600_fa26_prj2) or folder. Without it: the "
+              "project folder you are in, or every project in projects\\."),
+    )
+    status_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the status as JSON (for scripts and assistants).",
     )
 
     # manifest command
@@ -946,6 +968,22 @@ def main():
                     "Review the final instructor summary and student feedback "
                     "before entering grades in Brightspace."
                 )
+
+    elif args.command == "status":
+        try:
+            kind, target = resolve_status_target(args.project, Path.cwd())
+            if kind == "project":
+                status = project_status(target)
+                print(json.dumps(status, indent=2) if args.json
+                      else format_project_status(status))
+            else:
+                overview = projects_overview(target)
+                print(json.dumps({"projects_path": str(target), "projects": overview},
+                                 indent=2) if args.json
+                      else format_overview(target, overview))
+        except StatusError as error:
+            print(f"Status: {error}")
+            raise SystemExit(1)
 
     elif args.command == "manifest":
         output_path, manifest = write_project_manifest(
