@@ -2,6 +2,7 @@
 import fnmatch
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from ai_grader.repo_evidence import (
@@ -60,17 +61,33 @@ def deliverable_presence_checks(submission, spec):
     return {'method': 'anonymized_file_presence_v1', 'checks': checks}
 
 
+# A copy number a browser or Windows adds to a downloaded or copied file:
+# "notebook (1).ipynb", "notebook(2).ipynb".
+COPY_SUFFIX = re.compile(r"\s?\(\d+\)(?=\.[^.]*$|$)")
+
+
+def comparable_filename(name):
+    """
+    A filename as the naming check compares it: capitalization and a copy
+    number such as " (1)" are not naming errors (instructor policy, VIP P2
+    and MSPE 49600 P2), so both are ignored.
+    """
+    return COPY_SUFFIX.sub("", name).lower()
+
+
 def original_filename_checks(entries, username, full_name, spec, owners=()):
     """
     Check original names of a student's merged files (see merge_attempt_files).
     owners are the repository owners redacted from the artifact names.
+    Capitalization and copy numbers such as " (1)" are ignored.
     """
     checks = []
     for deliverable in spec["deliverables"]:
         patterns = deliverable.get("file_patterns", [])
         exact_paths = []
         for index, entry in enumerate(entries, start=1):
-            if any(fnmatch.fnmatchcase(entry["path"].name, pattern.replace("username", username))
+            name = comparable_filename(entry["path"].name)
+            if any(fnmatch.fnmatchcase(name, pattern.replace("username", username).lower())
                    for pattern in patterns):
                 exact_paths.append(anonymize_relative_path(
                     entry["relative_path"], index, username, full_name,

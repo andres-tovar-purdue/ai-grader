@@ -591,6 +591,10 @@ Brightspace creates one folder per attempt. AI Grader builds each student's subm
 
 You can rerun `prepare-submissions` until grading starts, for example after adding a late submission. It builds and validates the new output first, then replaces the earlier `anonymized_submissions\`, `submission_manifest.json`, `student_map.json` and repository evidence. Once grading has started (anything in `grader\grading_runs\` or `grader\debug_responses\`), it refuses and changes nothing, because those files refer to the current `Student_###` numbers.
 
+### File names
+
+Before anonymizing, AI Grader checks each student's original file names against the required names in the approved specification (with `username` replaced by the student's Brightspace username). Capitalization and copy numbers such as " (1)" or "(2)" that a browser or Windows adds are ignored, so `Astudent_PR02_Notebook (1).ipynb` matches `username_pr02_notebook.ipynb`. Any other difference, such as a different identifier in place of the username, counts as a naming difference, which the grading policy in the rubric decides how to treat. Only the result (match or no match) reaches the grader, never the original names.
+
 ### Late or emailed submissions
 
 A submission that did not come in the Brightspace download (for example, one received by email) must be named like a Brightspace folder; otherwise `prepare-submissions` skips it and warns that a folder could not be parsed (`status` reports it earlier). Put the student's files in one folder inside `submissions\` named:
@@ -1053,7 +1057,7 @@ Parse, select, anonymize, and inventory student submissions. Can be rerun until 
 python -m ai_grader refresh-submission-checks PROJECT_PATH
 ```
 
-Re-check original filenames against the approved specification without replacing the anonymized submissions.
+Re-check original filenames against the approved specification without replacing the anonymized submissions. Capitalization and copy numbers such as " (1)" added by a download are not counted as naming errors.
 
 ```text
 python -m ai_grader grade-submissions PROJECT_PATH
