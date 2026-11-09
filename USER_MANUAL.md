@@ -771,6 +771,8 @@ python -m ai_grader generate-report ".\projects\PROJECT_ID" --run run_v001 --ope
 | `total_instructor_score` | **your grade**, blank until you fill it |
 | `flag` | what needs your attention: notes the grader wrote for you (for example a PDF figure it could not read) and its review reasons; empty when there is nothing to check. These notes are never shown to students. |
 | `final_comment` | the short comment students will see next to the grade (one or two sentences on where points were lost and what to improve, or brief praise), written by the model from the itemized feedback; `--template-comments` builds it from the task scores without the model |
+| `deductions` | every point the student lost, as `label (-points)` items separated by semicolons, for example `README has no final recommendation (-0.5); constrained plot has no legend (-0.5)`. The points come from the grading run and are shown in steps of 0.5 (nearest half point; 0.75 shows as 1, 0.625 and 0.25 as 0.5); the short labels are written by the model (anonymous input; `--template-comments` takes them from the rubric's feedback text). You can reword a label or change an item |
+| `adjustment_reason` | blank. If your grade differs from the AI grade, say why here, for example `Late submission`; it labels your change in the student's comment |
 
 The itemized task scores and feedback follow. Check that the AI used appropriate evidence, deductions correspond to the approved grading specification, missing evidence was handled appropriately, valid alternatives were accepted, the same error was not penalized twice, review flags were investigated, and the feedback is appropriate.
 
@@ -789,7 +791,15 @@ python -m ai_grader finalize-grading ".\projects\PROJECT_ID" --run run_v001 `
     --scores-file ".\projects\PROJECT_ID\grader\grading_runs\run_v001\instructor_review_v001.csv"
 ```
 
-Your `total_instructor_score` is each student's grade and `final_comment` the comment. AI Grader writes `final_grades_for_brightspace.csv` with **Student Name, Username, Grade, Comment**, and lists (by anonymous ID) every student whose grade differs from the AI grade, for a last check. If your total differs from the sum of the AI's task scores, the difference is recorded in the instructor summary and shown in the student's detailed feedback as "Instructor adjustment to the task total". A blank `total_instructor_score` stops finalization and lists the students.
+Your `total_instructor_score` is each student's grade. The comment in the final CSV lists every lost point and adds up to the grade, followed by `final_comment`:
+
+```text
+Points lost: Validation plot has no 45-degree line (-0.5); validation discussion is brief (-1). Rounded up (+0.5). Late submission (-20). Grade: 79/100. Solid work; state your recommendation in the README.
+```
+
+The items come from `deductions`. "Rounded up" is the difference between the listed points and the grade AI Grader calculated, which rounds in the student's favor (generous-v1 rounding, and the half-point steps of the listed points). A difference between your grade and the AI grade appears with your `adjustment_reason` (or "Instructor adjustment"), and an adjustment round (curve) as "Final adjustment". A student with full marks and no changes gets `final_comment` alone. An item AI Grader cannot read as `label (-points)` is kept as written, without the rounding line, and finalization names the student. Review files from earlier versions without a `deductions` column keep `final_comment` as written.
+
+Running `generate-report` again for the same run writes the next review file and keeps what you entered in the previous one: your grades, adjustment reasons and comments you edited by hand. AI Grader writes `final_grades_for_brightspace.csv` with **Student Name, Username, Grade, Comment**, and lists (by anonymous ID) every student whose grade differs from the AI grade, for a last check. If your total differs from the sum of the AI's task scores, the difference is recorded in the instructor summary and shown in the student's detailed feedback as "Instructor adjustment to the task total". A blank `total_instructor_score` stops finalization and lists the students.
 
 ### Optional: adjust grades in your words
 

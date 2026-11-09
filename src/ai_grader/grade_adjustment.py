@@ -50,6 +50,9 @@ LEGACY_COLUMNS = ("grade_before_adjustment", "grade_source")
 # Rounding detail stays in preliminary_grading_report.csv and grading_results.json.
 HIDDEN_COLUMNS = ("raw_total_before_rounding", "total_rounding_adjustment")
 GRADE_COLUMNS = ["student_name", "student_id", "total_agent_score", "total_instructor_score"]
+# Itemized deductions for the student's comment (see itemized_feedback), and
+# the instructor's label for a change to the total, e.g. "Late submission".
+DEDUCTION_COLUMNS = ["deductions", "adjustment_reason"]
 REQUIRED_REVIEW_COLUMNS = {"student_id", "total_agent_score", "total_instructor_score"}
 COMMENT_BATCH = 10
 COMMENT_MAX_WORDS = 60
@@ -92,9 +95,10 @@ def review_fieldnames(fields, adjusted):
     """
     lead = [name for name in GRADE_COLUMNS if name in fields or name == "student_name"]
     middle = ["adjusted_grade", "adjustment", "adjusted_by"] if adjusted else []
+    itemized = [name for name in DEDUCTION_COLUMNS if name in fields]
     skip = (set(lead) | set(ADJUSTMENT_COLUMNS) | set(LEGACY_COLUMNS) | set(HIDDEN_COLUMNS)
-            | {"flag"})
-    return (lead + ["flag"] + middle + ["final_comment"]
+            | set(DEDUCTION_COLUMNS) | {"flag"})
+    return (lead + ["flag"] + middle + ["final_comment"] + itemized
             + [name for name in fields if name not in skip])
 
 
@@ -558,6 +562,16 @@ def adjust_grades(project_path, run_version, instructions=None, plan=None,
     }
 
 
+def _itemized_fields(fields, row):
+    """
+    The itemized-deduction cells of a review row. deductions is None when the
+    file has no deductions column (older review files): the comment is then
+    used as written.
+    """
+    return {"deductions": (row.get("deductions") or "") if "deductions" in fields else None,
+            "adjustment_reason": (row.get("adjustment_reason") or "").strip()}
+
+
 def review_decisions(review_path, maximum=None):
     """
     For finalization from a review file. Returns (approved_scores,
@@ -607,7 +621,8 @@ def review_decisions(review_path, maximum=None):
             approved[student_id] = instructor
             decisions[student_id] = {"final_grade": instructor, "comment": comment,
                                      "ai_grade": ai_grade, "grade_edited_by_hand": False,
-                                     "comment_edited_by_hand": False}
+                                     "comment_edited_by_hand": False,
+                                     **_itemized_fields(fields, row)}
             continue
         before = written.get(student_id)
         recorded = (before["grade_before_adjustment"] if before
@@ -633,6 +648,7 @@ def review_decisions(review_path, maximum=None):
             "ai_grade": ai_grade,
             "grade_edited_by_hand": bool(before and abs(before["adjusted_grade"] - final) > 1e-9),
             "comment_edited_by_hand": bool(before and before["final_comment"].strip() != comment),
+            **_itemized_fields(fields, row),
         }
     if blank:
         problems.insert(0, f"total_instructor_score is blank for {len(blank)} student(s) "

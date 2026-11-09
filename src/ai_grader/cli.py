@@ -1411,11 +1411,25 @@ def main():
         print(f"Review file: {report_path}")
         print(f"Short comments: {stats.get('ai', 0)} written by the model, "
               f"{stats.get('template', 0)} from the task scores")
+        if stats.get("deductions"):
+            print(f"Deductions listed for the students' comments: {stats['deductions']}"
+                  + (f" ({stats['label_fallbacks']} labels taken from the rubric text)"
+                     if stats.get("label_fallbacks") else ""))
+        if stats.get("carried_over"):
+            print(f"Kept what you entered in {stats['carried_from']} for "
+                  f"{stats['carried_over']} student(s): your grades, comments and "
+                  "adjustment reasons.")
+            if stats.get("carried_from_adjusted"):
+                print("  That file had an adjustment round (curve); run adjust-grades again "
+                      "if you still want it.")
         print()
         print("In the file, total_agent_score is the AI grade. Enter your grade in "
               "total_instructor_score for every student (copy the AI grade where you "
-              "agree) and check final_comment. Save as CSV UTF-8. AI grades stay "
-              "preliminary until you finalize.")
+              "agree) and check final_comment. 'deductions' lists every lost point for the "
+              "student's comment; you can reword it. If your grade differs from the AI "
+              "grade (for example a late penalty), say why in adjustment_reason (e.g. "
+              "'Late submission'). Save as CSV UTF-8. AI grades stay preliminary until "
+              "you finalize.")
         print("Then create the final CSV (Student Name, Username, Grade, Comment):")
         print_next_command(
             f'python -m ai_grader finalize-grading "{args.project_path}" '
@@ -1561,6 +1575,11 @@ def main():
             print(f"  Task feedback you edited in the review file: {edited_feedback}")
         if changed_totals:
             print(f"  Recorded as instructor adjustments to the task totals: {changed_totals}")
+        unreadable = validation.get("comments_with_unreadable_deductions")
+        if unreadable:
+            print(f"  Deductions written in a way AI Grader couldn't read as 'label (-points)' "
+                  f"for {len(unreadable)} student(s) ({', '.join(unreadable)}): their comments "
+                  "list them as written, without the line that makes the numbers add up.")
         print(f"Instructor summary (itemized): {csv_path.name}")
         print(f"Student feedback files: {len(txt_paths)} (one per student)")
         print(f"Feedback for Brightspace: {FEEDBACK_CSV_FILENAME}, "
