@@ -1299,6 +1299,13 @@ def main():
                       f"{'y' if unmatched == 1 else 'ies'} with GitHub links "
                       "could not be matched to exactly one student; their "
                       "repositories were not fetched.")
+            left = repositories.get("temporary_folders_not_removed")
+            if left:
+                print("  Note: another program (often antivirus or an editor) was still "
+                      "using these temporary download folders, so they were not deleted: "
+                      + ", ".join(f"grader\\{name}" for name in left)
+                      + ". Nothing is wrong with the results. The next prepare-submissions "
+                      "run removes them, or delete them yourself later.")
             print("  Graded repository files are the last commit at or before "
                   "each submission time. Facts and files are in each student's "
                   "anonymized folder; current repository states are kept in "

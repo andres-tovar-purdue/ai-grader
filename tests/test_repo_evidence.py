@@ -348,6 +348,107 @@ class GitIsolationTests(unittest.TestCase):
             self.assertIsNone(repo_evidence.list_public_repositories("someone"))
 
 
+class LockedFolderTests(unittest.TestCase):
+    """Windows: antivirus or an editor briefly holds files in a fresh clone."""
+
+    def locked(self, failures):
+        real = shutil.rmtree
+        calls = {"n": 0}
+
+        def rmtree(path, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] <= failures:
+                raise PermissionError(32, "The process cannot access the file because "
+                                          "it is being used by another process")
+            return real(path, *args, **kwargs)
+        return patch.object(repo_evidence.shutil, "rmtree", rmtree), calls
+
+    def test_remove_tree_retries_until_the_lock_clears(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "repo_x" / "checkout"
+            folder.mkdir(parents=True)
+            (folder / "file.txt").write_text("x", encoding="utf-8")
+            waits = []
+            locked, calls = self.locked(failures=3)
+            with locked:
+                self.assertTrue(repo_evidence.remove_tree(folder.parent, sleep=waits.append))
+            self.assertFalse(folder.parent.exists())
+            self.assertEqual(calls["n"], 4)
+            self.assertEqual(len(waits), 3)
+
+    def test_remove_tree_gives_up_without_raising(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "repo_x"
+            folder.mkdir()
+            locked, _ = self.locked(failures=10**6)
+            with locked:
+                self.assertFalse(repo_evidence.remove_tree(folder, retry_seconds=0,
+                                                           sleep=lambda _: None))
+            self.assertTrue(folder.exists())
+
+    def test_git_runs_without_background_maintenance(self):
+        with patch.object(repo_evidence.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, b"", b"")
+            repo_evidence.run_git(["log"])
+        args = run.call_args.args[0]
+        self.assertIn("gc.auto=0", args)
+        self.assertIn("maintenance.auto=false", args)
+
+    def test_locked_temporary_folder_does_not_stop_preparation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = RepositoryProject(directory)
+            real = repo_evidence.remove_tree
+
+            def never_removes_fetch_folder(path, *args, **kwargs):
+                if Path(path).name.startswith(repo_evidence.FETCH_FOLDER_PREFIX):
+                    return False
+                return real(path, *args, **kwargs)
+
+            with NoNetwork(fixture), \
+                 patch.object(repo_evidence, "remove_tree", never_removes_fetch_folder):
+                _, _, manifest = write_submission_manifest(fixture.project)
+            left = manifest["repository_evidence"]["temporary_folders_not_removed"]
+            self.assertEqual(len(left), 1)
+            self.assertTrue(left[0].startswith(".repo_fetch_"))
+            [facts] = facts_of(manifest, "Student_001")
+            self.assertEqual(facts["fetch_status"], "cloned")
+            self.assertTrue((fixture.project / "grader" / left[0]).is_dir())
+            serialized = json.dumps(manifest["repository_evidence"])
+            for text in IDENTITY_STRINGS:
+                self.assertNotIn(text.lower(), serialized.lower())
+
+            # The next run removes the leftover folder and reports nothing.
+            with NoNetwork(fixture):
+                _, _, second = write_submission_manifest(fixture.project)
+            self.assertNotIn("temporary_folders_not_removed", second["repository_evidence"])
+            self.assertEqual(list((fixture.project / "grader").glob(".repo_fetch_*")), [])
+
+
+class LockedFolderCommandTests(unittest.TestCase):
+    def test_prepare_submissions_explains_a_leftover_folder(self):
+        import io
+        from ai_grader.cli import main
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = RepositoryProject(directory)
+            real = repo_evidence.remove_tree
+
+            def never_removes_fetch_folder(path, *args, **kwargs):
+                if Path(path).name.startswith(repo_evidence.FETCH_FOLDER_PREFIX):
+                    return False
+                return real(path, *args, **kwargs)
+
+            output = io.StringIO()
+            with NoNetwork(fixture), \
+                 patch.object(repo_evidence, "remove_tree", never_removes_fetch_folder), \
+                 patch("sys.argv", ["ai_grader", "prepare-submissions", str(fixture.project)]), \
+                 patch("sys.stdout", output):
+                main()
+            text = output.getvalue()
+            self.assertIn("were not deleted: grader\\.repo_fetch_", text)
+            self.assertIn("Nothing is wrong with the results", text)
+            self.assertNotIn("Traceback", text)
+
+
 class SubmissionTimeTests(unittest.TestCase):
     def test_cutoff_is_end_of_the_newest_attempts_minute(self):
         identity = {"newest_source_folder": "b", "attempts": [

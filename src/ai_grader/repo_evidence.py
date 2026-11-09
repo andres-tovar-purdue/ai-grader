@@ -30,6 +30,7 @@ import re
 import shutil
 import stat
 import subprocess
+import time
 import sys
 import tempfile
 import urllib.error
@@ -363,8 +364,11 @@ def git_environment():
 
 
 def run_git(args, cwd=None, timeout=GIT_TIMEOUT_SECONDS):
+    # No background gc or maintenance: a detached git process working in a
+    # temporary clone would keep Windows from deleting it.
     return subprocess.run(
-        ["git", "-c", "credential.helper=", *args],
+        ["git", "-c", "credential.helper=", "-c", "gc.auto=0",
+         "-c", "maintenance.auto=false", *args],
         cwd=cwd, env=git_environment(), capture_output=True, timeout=timeout,
         stdin=subprocess.DEVNULL,
     )
@@ -728,15 +732,58 @@ def copy_tracked_files(clone_path, tracked, env_folders, identity, owner,
     return files, skipped, next_index
 
 
-def remove_tree(path):
-    """Remove a clone, including git's read-only object files on Windows."""
+# How long to keep retrying when another program (antivirus, Windows Search,
+# an editor's file watcher) briefly holds a file in a freshly cloned repository.
+REMOVE_RETRY_SECONDS = 15
+FETCH_FOLDER_PREFIX = ".repo_fetch_"
+
+
+def remove_tree(path, retry_seconds=REMOVE_RETRY_SECONDS, sleep=time.sleep):
+    """
+    Remove a clone, including git's read-only object files on Windows.
+
+    Windows refuses to delete a file or folder that another program has open
+    ("being used by another process"), which antivirus scanning of a fresh
+    clone often causes for a moment. Retries for up to retry_seconds, then
+    gives up without raising. Returns True when the folder is gone.
+    """
+
     def make_writable_and_retry(function, target, _):
-        os.chmod(target, stat.S_IWRITE)
+        try:
+            os.chmod(target, stat.S_IWRITE)
+        except OSError:
+            pass
         function(target)
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=make_writable_and_retry)
-    else:
-        shutil.rmtree(path, onerror=make_writable_and_retry)
+
+    deadline = time.monotonic() + retry_seconds
+    delay = 0.1
+    while True:
+        if not os.path.lexists(path):
+            return True
+        try:
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(path, onexc=make_writable_and_retry)
+            else:
+                shutil.rmtree(path, onerror=make_writable_and_retry)
+            return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            sleep(delay)
+            delay = min(delay * 2, 1.0)
+
+
+def remove_stale_fetch_folders(grader_path):
+    """
+    Remove temporary clone folders that an earlier run could not delete.
+    Returns the names of any that are still locked.
+    """
+
+    left = []
+    for folder in Path(grader_path).glob(FETCH_FOLDER_PREFIX + "*"):
+        if folder.is_dir() and not remove_tree(folder, retry_seconds=2):
+            left.append(folder.name)
+    return left
 
 
 # ---------------------------------------------------------------- per repository
@@ -1011,7 +1058,8 @@ def attach_repository_evidence(project_path, submissions, student_map,
     if by_student is None:
         return None, None
 
-    work_path = Path(tempfile.mkdtemp(prefix=".repo_fetch_",
+    stale = remove_stale_fetch_folders(project_path / "grader")
+    work_path = Path(tempfile.mkdtemp(prefix=FETCH_FOLDER_PREFIX,
                                       dir=project_path / "grader"))
     statuses = []
     private_map = {}
@@ -1042,8 +1090,11 @@ def attach_repository_evidence(project_path, submissions, student_map,
             if private:
                 candidate_counts[student_id] = len(private)
     finally:
-        remove_tree(work_path)
+        left = stale + ([] if remove_tree(work_path) else [work_path.name])
 
+    if left:
+        # Folder names only (random suffixes); they hold downloaded repositories.
+        counts["temporary_folders_not_removed"] = sorted(set(left))
     counts["fetch_status_counts"] = {
         status: statuses.count(status) for status in sorted(set(statuses))
     }
