@@ -174,6 +174,29 @@ class EvidenceAndFilenameTests(unittest.TestCase):
             self.assertEqual(checks['checks'][0]['status'],'exact_match')
             self.assertEqual(checks['checks'][0]['artifact_paths'],['artifact_001_student_pr01_analysis.csv'])
 
+    def test_capitalization_and_copy_numbers_are_not_naming_errors(self):
+        spec = {'deliverables': [dict(deliverable_id='notebook',
+                                      file_patterns=['username_pr02_notebook.ipynb'])]}
+        for name in ['Abc123_Pr02_Notebook.ipynb', 'abc123_pr02_notebook (1).ipynb',
+                     'ABC123_PR02_NOTEBOOK(2).IPYNB']:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                folder = Path(directory); (folder/name).write_text('{}')
+                checks = original_filename_checks(merge_attempt_files([folder]), 'abc123',
+                                                  'Jane Student', spec)
+                self.assertEqual(checks['checks'][0]['status'], 'exact_match')
+                self.assertNotIn('abc123', json.dumps(checks).lower())
+
+    def test_other_identifiers_and_numbers_still_fail(self):
+        spec = {'deliverables': [dict(deliverable_id='notebook',
+                                      file_patterns=['username_pr02_notebook.ipynb'])]}
+        for name in ['janestudent04_pr02_notebook.ipynb', 'abc123_pr02_notebook2.ipynb',
+                     'abc123_pr02 (1)_notebook.ipynb']:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                folder = Path(directory); (folder/name).write_text('{}')
+                checks = original_filename_checks(merge_attempt_files([folder]), 'abc123',
+                                                  'Jane Student', spec)
+                self.assertEqual(checks['checks'][0]['status'], 'no_exact_match')
+
     def test_real_typo_is_preserved_as_failed_compliance(self):
         with tempfile.TemporaryDirectory() as directory:
             folder=Path(directory); (folder/'abc123_pro1_analysis.csv').write_text('x\n1\n')

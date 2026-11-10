@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ai_grader.brightspace import feedback_body, write_student_outputs
 from ai_grader.grade_adjustment import template_comment
+from ai_grader.itemized_feedback import itemized_comment
 from ai_grader.spec_validation import validate_spec_data, load_json
 from ai_grader.submission_checks import spec_fingerprint
 from ai_grader.rounding import apply_rounding
@@ -173,6 +174,7 @@ def finalize_grading(
     rows = []
     text_outputs = {}
     brightspace_records = []
+    itemized_problems = []
     for result in run["results"]:
         student_id = result["student_id"]
         full_name = student_map[student_id]["full_name"]
@@ -239,6 +241,14 @@ def finalize_grading(
         flags.extend(f"Comment: {note}" for note in removed)
         if not final_comment:
             final_comment = template_comment(tasks)
+        decision = (decisions or {}).get(student_id, {})
+        if decision.get("deductions") is not None:
+            # Every lost point listed, adding up to the final grade (see itemized_feedback).
+            final_comment, problem = itemized_comment(
+                decision["deductions"], rounded["final_rounded_grade"], approved_total,
+                final_grade, project_maximum, final_comment, decision.get("adjustment_reason"))
+            if problem:
+                itemized_problems.append(student_id)
         found = [(f"task_{number}_feedback", internal_terms(task["feedback"]))
                  for number, task in enumerate(tasks, start=1)]
         found += [("final_comment", internal_terms(final_comment))]
@@ -358,6 +368,8 @@ def finalize_grading(
         csv_path=csv_path,
         project_maximum=project_maximum,
     )
+    if itemized_problems:
+        validation["comments_with_unreadable_deductions"] = sorted(itemized_problems)
     return output_path, csv_path, txt_paths, validation
 
 

@@ -9,7 +9,46 @@ import sys
 from pathlib import Path
 
 
-from ai_grader.grade_adjustment import comments_for_run, review_fieldnames, review_flag
+from ai_grader.ai_client import resolve_model
+from ai_grader.grade_adjustment import (
+    DEDUCTION_COLUMNS, _load_spec, comments_for_run, review_fieldnames, review_flag,
+    review_versions,
+)
+from ai_grader.itemized_feedback import deduction_items, deduction_labels, deductions_cell
+
+
+# What the instructor typed in an earlier review file of the same run; a new
+# review file keeps it, so regenerating (e.g. to add the deductions column)
+# never loses entered grades or edited comments.
+CARRIED_COLUMNS = ("total_instructor_score", "final_comment", "adjustment_reason")
+
+
+def earlier_entries(run_path):
+    """
+    ({student_id: {column: value}}, file name, was an adjusted file) from the
+    run's latest review file, or ({}, None, False) if there is none or it
+    can't be read.
+    """
+    versions = review_versions(run_path)
+    if not versions:
+        return {}, None, False
+    latest = versions[-1]
+    try:
+        with latest.open(encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream)
+            fields = reader.fieldnames or []
+            rows = list(reader)
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return {}, None, False
+    if "student_id" not in fields:
+        return {}, None, False
+    entries = {}
+    for row in rows:
+        kept = {column: (row.get(column) or "").strip() for column in CARRIED_COLUMNS
+                if (row.get(column) or "").strip()}
+        if kept and row.get("student_id"):
+            entries[row["student_id"]] = kept
+    return entries, latest.name, "adjusted_grade" in fields
 
 
 def generate_review_report(project_path, run_version=None, use_model_comments=False,
@@ -63,14 +102,40 @@ def generate_review_report(project_path, run_version=None, use_model_comments=Fa
         row["total_instructor_score"] = ""
     comments, fallbacks = comments_for_run(project_path, run_version, client, model,
                                            use_model_comments)
+    try:
+        spec = _load_spec(grader, run_path, run)
+    except (OSError, ValueError):
+        spec = {"tasks": []}
+    items = {result["student_id"]: deduction_items(result, spec)
+             for result in run.get("results", [])}
+    labels, label_fallbacks, _ = deduction_labels(
+        run_path, items, client, resolve_model(model), use_model_comments)
+    carried, carried_from, carried_adjusted = earlier_entries(run_path)
+    templates = (comments_for_run(project_path, run_version, use_model=False)[0]
+                 if carried else {})
     for row in rows:
-        row["final_comment"] = comments.get(row["student_id"], ("", "template"))[0]
+        student_id = row["student_id"]
+        row["final_comment"] = comments.get(student_id, ("", "template"))[0]
         row["flag"] = review_flag(row)
+        row["deductions"] = deductions_cell(items.get(student_id, []),
+                                            labels.get(student_id, []))
+        row["adjustment_reason"] = ""
+        kept = dict(carried.get(student_id, {}))
+        earlier_comment = kept.get("final_comment")
+        if earlier_comment in (row["final_comment"],
+                               templates.get(student_id, ("", ""))[0]):
+            kept.pop("final_comment")       # Not edited by hand: use the new comment.
+        row.update(kept)
     if comment_stats is not None:
         comment_stats.update({
             "ai": sum(1 for _, source in comments.values() if source == "ai"),
             "template": sum(1 for _, source in comments.values() if source == "template"),
-            "fallbacks": sum(fallbacks.values()), "fallback_reasons": fallbacks})
+            "fallbacks": sum(fallbacks.values()), "fallback_reasons": fallbacks,
+            "deductions": sum(len(value) for value in items.values()),
+            "label_fallbacks": sum(label_fallbacks.values()),
+            "label_fallback_reasons": label_fallbacks,
+            "carried_over": len(carried), "carried_from": carried_from,
+            "carried_from_adjusted": carried_adjusted})
 
     # Exclusive creation preserves any existing instructor edits on repeated runs.
     version = 1
@@ -82,7 +147,9 @@ def generate_review_report(project_path, run_version=None, use_model_comments=Fa
         except FileExistsError:
             version += 1
     with stream:
-        writer = csv.DictWriter(stream, fieldnames=review_fieldnames(fields, adjusted=False),
+        writer = csv.DictWriter(stream,
+                                fieldnames=review_fieldnames(fields + DEDUCTION_COLUMNS,
+                                                             adjusted=False),
                                 extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)

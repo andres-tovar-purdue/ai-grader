@@ -72,7 +72,15 @@ def _format_datasets(datasets):
     return "\n\n---\n\n".join(sections)
 
 
-def build_preparation_prompt(project_path, sources, datasets, instructions):
+def build_preparation_prompt(project_path, sources, datasets, instructions, policy=""):
+    policy_section = ""
+    if policy.strip():
+        policy_section = f"""
+
+INSTRUCTOR GRADING POLICY (the course's standing decisions; apply them in the
+rubric draft, state them in a "## Instructor Grading Policy" section at its top,
+and do not ask the instructor to decide them again):
+{policy.strip()}"""
     return f"""
 Prepare three instructor-reviewable Markdown drafts for the engineering project
 named {Path(project_path).resolve().name}.
@@ -86,7 +94,7 @@ ORIGINAL PROJECT MATERIALS:
 {_format_sources(sources)}
 
 CSV DATASETS:
-{_format_datasets(datasets)}
+{_format_datasets(datasets)}{policy_section}
 """.strip()
 
 
@@ -147,8 +155,9 @@ def prepare_project(project_path, client=None, full_csv_max_bytes=200_000):
         / "project_preparation_instructions.md"
     )
     instructions = prompt_path.read_text(encoding="utf-8")
+    from ai_grader.course_policy import policy_text
     prompt = build_preparation_prompt(
-        project_path, sources, datasets, instructions
+        project_path, sources, datasets, instructions, policy_text(project_path)
     )
 
     client = client or get_client()

@@ -11,8 +11,9 @@ AI Grader is a human-supervised AI grading assistant for instructors and student
 - Activate the venv before running anything:
   - from the repo root: `.\.venv\Scripts\Activate.ps1`
   - from the workspace (`..`): `.\ai-grader\.venv\Scripts\Activate.ps1`
-- CLI: `python -m ai_grader <command>`, run from the workspace (`init-project` creates projects under `.\projects\` relative to the current directory, so running it from the repo root would put them inside the repo). Commands: check-setup, init-project, prepare-project, validate, inspect, manifest, generate-spec, approve-spec, prepare-submissions, refresh-submission-checks, grade-submissions, recover-grading, archive-grading, generate-report, adjust-grades, finalize-grading, export-brightspace.
+- CLI: `python -m ai_grader <command>`, run from the workspace (`init-project` creates projects under `.\projects\` relative to the current directory, so running it from the repo root would put them inside the repo). Commands: check-setup, status, continue, init-project, prepare-project, validate, inspect, manifest, generate-spec, approve-spec, prepare-submissions, refresh-submission-checks, grade-submissions, recover-grading, archive-grading, generate-report, adjust-grades, finalize-grading, export-brightspace.
 - Model: `OPENAI_MODEL` from `.env`; the single fallback is `DEFAULT_MODEL` in `ai_client.py` (use `resolve_model()`, don't add new defaults). Commands that call the model print `describe_model()` first.
+- Workflow: 5 stages (Set up, Rubric, Grade, Review grades, Finalize). `continue PROJECT [--approve]` runs the automatic steps until the instructor is needed (`workflow_continue.py`); `status [PROJECT]` is the privacy-safe view (counts only, `workflow_status.project_state`); ask the instructor for its output instead of `inspect` output. Course policy: `projects\_policies\COURSE.md` (`course_policy.py`).
 - Tests: from the repo root, `python -m unittest discover -s tests -v`. The suite mocks OpenAI and needs no API key. Run it before saying work is done.
 
 ## Layout

@@ -32,12 +32,19 @@ from ai_grader.rounding import DEFAULT_ROUNDING_POLICY, ROUNDING_POLICIES
 from ai_grader.run_archive import ArchiveError, archive_grading
 from ai_grader.setup_check import run_setup_checks
 from ai_grader.spec_approval import approve_grading_spec
-from ai_grader.spec_generation import InvalidSpecResponseError, generate_grading_spec
+from ai_grader.spec_generation import (
+    InvalidSpecResponseError, derived_presence_deliverables, generate_grading_spec,
+)
 from ai_grader.spec_validation import validate_grading_spec
 from ai_grader.submission_processing import (
     SubmissionsAlreadyGradedError, previous_preparation_paths, write_submission_manifest,
 )
 from ai_grader.submission_checks import refresh_submission_checks
+from ai_grader.workflow_status import (
+    StatusError, format_overview, format_project_status, project_status,
+    projects_overview, resolve_status_target,
+)
+from ai_grader.workflow_continue import ContinueStopped, continue_project
 
 
 load_dotenv()
@@ -383,6 +390,46 @@ def main():
         help="Path to the project folder."
     )
 
+    # continue command
+    continue_parser = subparsers.add_parser(
+        "continue",
+        help=("Run every automatic step of the 5-stage workflow (set up, rubric, "
+              "grade, review grades, finalize) until you are needed, then say what "
+              "is needed."),
+    )
+    continue_parser.add_argument(
+        "project",
+        help="Project name (e.g. mspe_49600_fa26_prj3) or folder.",
+    )
+    continue_parser.add_argument(
+        "--approve",
+        action="store_true",
+        help=("Approve the rubric (after checking the review package with Claude) "
+              "and go on to grading."),
+    )
+    continue_parser.add_argument(
+        "--model",
+        help="Model for the AI steps. Default: OPENAI_MODEL.",
+    )
+
+    # status command
+    status_parser = subparsers.add_parser(
+        "status",
+        help=("Where a project stands: the 5 stages, done or not, and what comes "
+              "next. Counts only, no student names."),
+    )
+    status_parser.add_argument(
+        "project",
+        nargs="?",
+        help=("Project name (e.g. mspe_49600_fa26_prj2) or folder. Without it: the "
+              "project folder you are in, or every project in projects\\."),
+    )
+    status_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the status as JSON (for scripts and assistants).",
+    )
+
     # manifest command
     manifest_parser = subparsers.add_parser(
         "manifest",
@@ -403,6 +450,11 @@ def main():
     generate_spec_parser.add_argument(
         "project_path",
         help="Path to the project folder."
+    )
+    generate_spec_parser.add_argument(
+        "--from-response",
+        help=("Use a saved model response (e.g. grader\\invalid_spec_response_*.json "
+              "from an earlier run) instead of a new AI request."),
     )
 
     # approve-spec command
@@ -947,6 +999,50 @@ def main():
                     "before entering grades in Brightspace."
                 )
 
+    elif args.command == "continue":
+        try:
+            kind, target = resolve_status_target(args.project, Path.cwd())
+            if kind != "project":
+                raise StatusError("Name the project, for example: "
+                                  "python -m ai_grader continue mspe_49600_fa26_prj3")
+            print(describe_model(args.model))
+            print()
+            state = continue_project(target, approve=args.approve, model=args.model)
+        except StatusError as error:
+            print(f"continue: {error}")
+            raise SystemExit(1)
+        except ContinueStopped as error:
+            print()
+            print(f"Stopped: {error}")
+            print()
+            print(format_project_status(project_status(target)))
+            raise SystemExit(1)
+        except Exception as error:
+            if not is_api_error(error):
+                raise
+            print()
+            print("Stopped: the OpenAI API refused the request "
+                  f"({describe_api_error(error)}). Everything finished so far is kept; "
+                  "run continue again when the API is available.")
+            raise SystemExit(1)
+        print(format_project_status(state))
+
+    elif args.command == "status":
+        try:
+            kind, target = resolve_status_target(args.project, Path.cwd())
+            if kind == "project":
+                status = project_status(target)
+                print(json.dumps(status, indent=2) if args.json
+                      else format_project_status(status))
+            else:
+                overview = projects_overview(target)
+                print(json.dumps({"projects_path": str(target), "projects": overview},
+                                 indent=2) if args.json
+                      else format_overview(target, overview))
+        except StatusError as error:
+            print(f"Status: {error}")
+            raise SystemExit(1)
+
     elif args.command == "manifest":
         output_path, manifest = write_project_manifest(
             args.project_path
@@ -967,12 +1063,19 @@ def main():
             / "grading_spec.schema.json"
         )
 
-        print(describe_model())
+        if args.from_response:
+            print(f"No AI request: using the saved response {args.from_response}")
+        else:
+            print(describe_model())
         try:
             output_path, spec = generate_grading_spec(
                 args.project_path,
                 schema_path,
+                response_path=args.from_response,
             )
+        except FileNotFoundError as error:
+            print(f"generate-spec: {error}")
+            raise SystemExit(1)
         except InvalidSpecResponseError as error:
             print()
             print("The generated grading specification failed validation.")
@@ -984,9 +1087,10 @@ def main():
             if len(error.messages) > 20:
                 print(f"  ... and {len(error.messages) - 20} more")
             print()
-            print("The model's raw response was saved to:")
-            print(f"  {error.response_path}")
-            print()
+            if error.saved_again:
+                print("The model's raw response was saved to:")
+                print(f"  {error.response_path}")
+                print()
             print("Rerun generate-spec to try again.")
             raise SystemExit(1)
 
@@ -997,6 +1101,10 @@ def main():
         )
         print(f"Tasks generated: {len(spec['tasks'])}")
         print("Grading specification passed schema validation.")
+        filled = derived_presence_deliverables(spec)
+        if filled:
+            print(f"File-presence patterns filled in by AI Grader for "
+                  f"{len(filled)} deliverable(s): {', '.join(filled)}")
 
         print()
         print("Instructor review required before approval.")
@@ -1242,6 +1350,13 @@ def main():
                       f"{'y' if unmatched == 1 else 'ies'} with GitHub links "
                       "could not be matched to exactly one student; their "
                       "repositories were not fetched.")
+            left = repositories.get("temporary_folders_not_removed")
+            if left:
+                print("  Note: another program (often antivirus or an editor) was still "
+                      "using these temporary download folders, so they were not deleted: "
+                      + ", ".join(f"grader\\{name}" for name in left)
+                      + ". Nothing is wrong with the results. The next prepare-submissions "
+                      "run removes them, or delete them yourself later.")
             print("  Graded repository files are the last commit at or before "
                   "each submission time. Facts and files are in each student's "
                   "anonymized folder; current repository states are kept in "
@@ -1347,11 +1462,25 @@ def main():
         print(f"Review file: {report_path}")
         print(f"Short comments: {stats.get('ai', 0)} written by the model, "
               f"{stats.get('template', 0)} from the task scores")
+        if stats.get("deductions"):
+            print(f"Deductions listed for the students' comments: {stats['deductions']}"
+                  + (f" ({stats['label_fallbacks']} labels taken from the rubric text)"
+                     if stats.get("label_fallbacks") else ""))
+        if stats.get("carried_over"):
+            print(f"Kept what you entered in {stats['carried_from']} for "
+                  f"{stats['carried_over']} student(s): your grades, comments and "
+                  "adjustment reasons.")
+            if stats.get("carried_from_adjusted"):
+                print("  That file had an adjustment round (curve); run adjust-grades again "
+                      "if you still want it.")
         print()
         print("In the file, total_agent_score is the AI grade. Enter your grade in "
               "total_instructor_score for every student (copy the AI grade where you "
-              "agree) and check final_comment. Save as CSV UTF-8. AI grades stay "
-              "preliminary until you finalize.")
+              "agree) and check final_comment. 'deductions' lists every lost point for the "
+              "student's comment; you can reword it. If your grade differs from the AI "
+              "grade (for example a late penalty), say why in adjustment_reason (e.g. "
+              "'Late submission'). Save as CSV UTF-8. AI grades stay preliminary until "
+              "you finalize.")
         print("Then create the final CSV (Student Name, Username, Grade, Comment):")
         print_next_command(
             f'python -m ai_grader finalize-grading "{args.project_path}" '
@@ -1497,6 +1626,11 @@ def main():
             print(f"  Task feedback you edited in the review file: {edited_feedback}")
         if changed_totals:
             print(f"  Recorded as instructor adjustments to the task totals: {changed_totals}")
+        unreadable = validation.get("comments_with_unreadable_deductions")
+        if unreadable:
+            print(f"  Deductions written in a way AI Grader couldn't read as 'label (-points)' "
+                  f"for {len(unreadable)} student(s) ({', '.join(unreadable)}): their comments "
+                  "list them as written, without the line that makes the numbers add up.")
         print(f"Instructor summary (itemized): {csv_path.name}")
         print(f"Student feedback files: {len(txt_paths)} (one per student)")
         print(f"Feedback for Brightspace: {FEEDBACK_CSV_FILENAME}, "

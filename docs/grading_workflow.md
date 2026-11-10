@@ -16,7 +16,7 @@ Agreed design (2026-10-18). The grading agent (Claude Code today; a standalone A
 | 7 | **Finalize** | Applies instructor overrides and writes (a) an internal CSV with every criterion, comment, evidence and override, and (b) Brightspace-ready output: final score + short feedback explaining where points were lost (brief praise if full marks). Versioned; never overwrites. | Approves final grades. | `adjust-grades` turns the instructor's plain-language adjustments (curve to targets, raised grades, comment wording) into a validated plan and writes the next `instructor_review_v###.csv` with adjusted grades and short comments; rounds repeat. `finalize-grading` writes `final_grades_for_brightspace.csv` (grade + comment), the itemized instructor summary, per-student TXT feedback; `export-brightspace` fills the grades import CSV. |
 | 8 | **Release** | Prepares the upload. Nothing is published without explicit authorization. | Uploads / releases. | Manual. See below. |
 
-At any point: "Where are we?" / "Continue where we stopped" returns the stage, what's done, what's blocked and the next step (`inspect` already does part of this; needs `--json`).
+At any point: "Where are we?" / "Continue where we stopped" returns the stage, what's done, what's blocked and the next step: `python -m ai_grader status [PROJECT]` (text or `--json`, counts only). A conversational agent can read `status --json` to decide what to say and do next.
 
 ## Getting grades into Brightspace (options, best first)
 1. **Grades CSV import** (Brightspace Grades → Import): scores for all students in one upload, no IT approval. AI Grader writes the file in Brightspace's import format, keyed by username/OrgDefinedId from the private student map. Whether feedback text can go in the same import needs checking.
@@ -32,6 +32,6 @@ The agent works with Student_### IDs. Names and usernames appear only in locally
 3. Brightspace grades import CSV + copy-paste feedback list (stages 7–8).
 4. Review flags and prioritized review list (stage 6).
 5. Agreement summary and rubric-change impact (stage 5).
-6. Spec plain-language summary/diff (stage 3); `inspect --json` (status).
+6. Spec plain-language summary/diff (stage 3). ~~Status~~ done: `status [PROJECT] [--json]`.
 7. Due date / late policy (stage 1).
 Plus, for MSPE 49600: ~~`check-github-repos`~~ done generically: `prepare-submissions` collects GitHub repositories linked in `index.html` as evidence (facts + files). For MSPE 29800: Excel/PDF content extraction.

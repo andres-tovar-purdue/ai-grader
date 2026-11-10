@@ -48,9 +48,25 @@ Finalize grades and feedback
 
 A useful rule is:
 
-> **When in doubt, run `inspect`.**
+> **Two commands do almost everything: `status` and `continue`.**
 
-The `inspect` command reports the current project contents, identifies the workflow stage, tells the user what should be reviewed, and prints the next command to run.
+Grading runs in 5 stages. You act at three points; AI Grader does the rest.
+
+| # | Stage | What AI Grader does | Your part |
+|---|---|---|---|
+| 1 | Set up | Sorts the files you drop in the project folder; unpacks the Brightspace ZIP; copies in the course grading policy | Drop the ZIP, assignment PDF, datasets and your solution in `projects\PROJECT_ID\` |
+| 2 | Rubric | Drafts the rubric, instructions and reference solution, generates the grading specification (course policy enforced) and writes a review package without student data | Check the package with Claude, then approve once |
+| 3 | Grade | Anonymizes, downloads repositories, grades (failed students asked again once), writes your review sheet | None |
+| 4 | Review grades | — | Enter or confirm each grade in the review sheet |
+| 5 | Finalize | Writes the final grades, itemized comments and Brightspace files | Enter the grades in Brightspace |
+
+```powershell
+python -m ai_grader continue PROJECT_ID             # runs every automatic step, stops when you are needed
+python -m ai_grader continue PROJECT_ID --approve   # after checking the rubric: approve and grade
+python -m ai_grader status PROJECT_ID               # where the project stands (counts only, safe to share)
+```
+
+`continue` runs the same commands described in the rest of this manual, in order, and stops at each checkpoint with exactly what it needs from you. Everything stays versioned; nothing is overwritten. `status` changes nothing, makes no AI request and prints counts, never student names; without a project name it lists every project and its stage. The individual commands remain available for advanced use and automation.
 
 ---
 
@@ -214,6 +230,26 @@ Do **not** commit `.env` to Git or share the API key.
 
 # Part II — Starting a New Grading Project
 
+## 9a. The Short Way: continue
+
+1. Create `projects\PROJECT_ID\` (for example `mspe_49600_fa26_prj3`) and put in it, at the top level: the Brightspace download ZIP, the assignment PDF, any datasets, and your own solution if you have one (PDF; Word files and notebooks are moved to `project\` but not read).
+2. Run `python -m ai_grader continue PROJECT_ID`. AI Grader sorts the files, drafts the rubric and the grading specification (two AI requests) and writes `grader\review_package_v001.zip`, which holds no student data.
+3. Upload the package to Claude. Save any corrected files it returns where it says: Markdown drafts over the ones in `project\`, `rubric\` or `reference\`; a corrected specification as `grader\grading_spec_reviewed.json`. If you changed a Markdown draft yourself, run `continue` once more to regenerate the specification.
+4. Run `python -m ai_grader continue PROJECT_ID --approve`. AI Grader records your approval, then anonymizes, grades and writes your review sheet.
+5. Fill in the review sheet (Section 22), save it as CSV UTF-8, and run `continue` again. It writes the final grades and comments.
+6. Enter the grades in Brightspace (Section 24).
+
+**Course grading policy.** A course's standing decisions (for example, "every attempted item keeps at least half its points") live in `projects\_policies\COURSE.md`, where COURSE is the start of the project name (`mspe_49600`). Set-up copies it to the project's `rubric\grading_policy.md`; the rubric drafting and the specification read it, and two settings are enforced in code:
+
+```text
+minimum_attempted_fraction: 0.5   every attempted rubric item keeps at least this share of its points
+point_step: 0.5                   deductions are shown to students in steps of this size
+```
+
+With `minimum_attempted_fraction`, each item deduction in the specification becomes an "attempted but incomplete or incorrect" rule (the item's points × (1 − fraction)) and a "completely missing" rule (all of the item's points).
+
+---
+
 ## 10. Initialize a Project
 
 Run AI Grader from the workspace root:
@@ -353,25 +389,35 @@ Do not rename the Brightspace folders before running submission preparation.
 
 ---
 
-## 12. Inspect the Project
+## 12. Check Where the Project Stands
 
-After copying the inputs, run:
-
-```powershell
-python -m ai_grader inspect .\projects\PROJECT_ID
-```
-
-For example:
+At any time, from the workspace:
 
 ```powershell
-python -m ai_grader inspect .\projects\mspe_49600_fa26_pr01
+python -m ai_grader status mspe_49600_fa26_prj3
 ```
 
-`inspect` lists the files in the project folders and determines the current workflow stage.
+Example output:
 
-At the end of the output, AI Grader prints the current workflow status, what the user should verify or review, and the next command to run.
+```text
+Project: mspe_49600_fa26_prj3
 
-This command can be used at any time to determine where a project is in the grading workflow.
+  [done] 1. Set up: 5 students, 1 assignment file, 1 dataset, course policy
+  [next] 2. Rubric: grading_spec_v001.json: draft
+  [    ] 3. Grade
+  [    ] 4. Review grades
+  [    ] 5. Finalize
+
+Your turn: Check the rubric: upload grader\review_package_v001.zip (no student data) to Claude and save any corrected files it returns as it says. When you are satisfied, approve it:
+
+  python -m ai_grader continue mspe_49600_fa26_prj3 --approve
+```
+
+When the next step is automatic, `status` says what AI Grader will do and shows the `continue` command. Under **Needs attention** it reports problems before they cost a step: a submission folder not named like Brightspace's (it would be skipped; see "Late or emailed submissions" in Section 18), a submission date it can't read, files in `project\` that are not read, a student added after anonymizing, a review sheet that can't be read.
+
+`status` changes nothing, makes no AI request, and prints counts, versions and AI Grader's own file names, never student names, usernames or submission folder names. `--json` prints the same information for scripts and assistants.
+
+`inspect` is the older, more detailed view: it also lists every file in the project folders, including submission folders whose names contain student names, so do not paste its output into a chat or email.
 
 ---
 
@@ -451,7 +497,13 @@ If the generated specification still fails the checks, no draft is written. AI G
 grader\invalid_spec_response_<timestamp>.json
 ```
 
-Rerun `generate-spec` to try again.
+Rerun `generate-spec` to try again (a new AI request), or, after updating AI Grader with a fix for the reported problem, check the saved response again without a new request:
+
+```powershell
+python -m ai_grader generate-spec .\projects\PROJECT_ID --from-response ".\projects\PROJECT_ID\grader\invalid_spec_response_<timestamp>.json"
+```
+
+A missing-file deduction (a rule with basis `file_presence`) needs patterns that find the file among the anonymized file names. When the model leaves them out, AI Grader derives them from the required file name (for `username_pr02_notebook.ipynb`, the pattern `*_pr02_notebook.ipynb`), says so when it writes the draft, and records it in that deliverable's notes.
 
 ---
 
@@ -564,6 +616,20 @@ Brightspace creates one folder per attempt. AI Grader builds each student's subm
 
 You can rerun `prepare-submissions` until grading starts, for example after adding a late submission. It builds and validates the new output first, then replaces the earlier `anonymized_submissions\`, `submission_manifest.json`, `student_map.json` and repository evidence. Once grading has started (anything in `grader\grading_runs\` or `grader\debug_responses\`), it refuses and changes nothing, because those files refer to the current `Student_###` numbers.
 
+### File names
+
+Before anonymizing, AI Grader checks each student's original file names against the required names in the approved specification (with `username` replaced by the student's Brightspace username). Capitalization and copy numbers such as " (1)" or "(2)" that a browser or Windows adds are ignored, so `Astudent_PR02_Notebook (1).ipynb` matches `username_pr02_notebook.ipynb`. Any other difference, such as a different identifier in place of the username, counts as a naming difference, which the grading policy in the rubric decides how to treat. Only the result (match or no match) reaches the grader, never the original names.
+
+### Late or emailed submissions
+
+A submission that did not come in the Brightspace download (for example, one received by email) must be named like a Brightspace folder; otherwise `prepare-submissions` skips it and warns that a folder could not be parsed (`status` reports it earlier). Put the student's files in one folder inside `submissions\` named:
+
+```text
+999999-999999 - USERNAME First Last - Oct 12, 2026 900 PM
+```
+
+Any two numbers joined by a hyphen; the student's Brightspace username and full name as on the class list (the username is the key for the Brightspace grades import); and the time they submitted, written as Brightspace writes it (month name, no colon in the time). That time is used for their GitHub repository snapshot. AI Grader does not apply late penalties: the instructor applies them in `total_instructor_score` during review.
+
 ### GitHub repositories linked in submissions
 
 If students submit a link to a GitHub repository, for example in the Brightspace submission text, `prepare-submissions` also collects the repository as evidence. Links come from Brightspace's `submissions\index.html`. For a student with no repository link there, AI Grader also uses GitHub repository links found in that student's PDF or notebook text (read before redaction). Without any GitHub links, nothing changes.
@@ -600,6 +666,8 @@ The facts file and the graded repository files are passed to grading as evidence
 | no link in the submission text | The submission has no link at all. |
 | no entry in index.html | The student has no submission text in `index.html`. |
 | no GitHub link in index.html or in the PDF or notebook text | `index.html` has no GitHub links, and the student's PDFs and notebooks have none either. |
+
+**Temporary download folders.** Each repository is downloaded into a temporary folder in `grader\` (named `.repo_fetch_…`) and deleted afterwards. On Windows, antivirus or an editor sometimes holds a freshly downloaded file for a moment; AI Grader then retries for up to 15 seconds. A folder that is still in use is left in place, reported at the end of `prepare-submissions`, and removed by the next run. The results are not affected.
 
 **Possible repositories for instructor review.** If a linked repository cannot be fetched, or a student linked only their GitHub profile, AI Grader looks up the owner's public repositories with an anonymous request to GitHub (no account or token) and lists those whose names match the project. A name matches when it is the linked repository's name, the project folder's name or the specification's project ID, ignoring underscores, hyphens and capitalization, or when it uses two or more parts of those names in order (for example `MSPE49600-PR02` for `mspe_49600_fa26_pr02`). These candidates are written only to the private `grader\repository_map.json`; the facts file records just how many there are. **Candidates are never fetched or graded.** Check them yourself and decide.
 
@@ -722,6 +790,8 @@ python -m ai_grader generate-report ".\projects\PROJECT_ID" --run run_v001 --ope
 | `total_instructor_score` | **your grade**, blank until you fill it |
 | `flag` | what needs your attention: notes the grader wrote for you (for example a PDF figure it could not read) and its review reasons; empty when there is nothing to check. These notes are never shown to students. |
 | `final_comment` | the short comment students will see next to the grade (one or two sentences on where points were lost and what to improve, or brief praise), written by the model from the itemized feedback; `--template-comments` builds it from the task scores without the model |
+| `deductions` | every point the student lost, as `label (-points)` items separated by semicolons, for example `README has no final recommendation (-0.5); constrained plot has no legend (-0.5)`. The points come from the grading run and are shown in steps of 0.5 (nearest half point; 0.75 shows as 1, 0.625 and 0.25 as 0.5); the short labels are written by the model (anonymous input; `--template-comments` takes them from the rubric's feedback text). You can reword a label or change an item |
+| `adjustment_reason` | blank. If your grade differs from the AI grade, say why here, for example `Late submission`; it labels your change in the student's comment |
 
 The itemized task scores and feedback follow. Check that the AI used appropriate evidence, deductions correspond to the approved grading specification, missing evidence was handled appropriately, valid alternatives were accepted, the same error was not penalized twice, review flags were investigated, and the feedback is appropriate.
 
@@ -740,7 +810,15 @@ python -m ai_grader finalize-grading ".\projects\PROJECT_ID" --run run_v001 `
     --scores-file ".\projects\PROJECT_ID\grader\grading_runs\run_v001\instructor_review_v001.csv"
 ```
 
-Your `total_instructor_score` is each student's grade and `final_comment` the comment. AI Grader writes `final_grades_for_brightspace.csv` with **Student Name, Username, Grade, Comment**, and lists (by anonymous ID) every student whose grade differs from the AI grade, for a last check. If your total differs from the sum of the AI's task scores, the difference is recorded in the instructor summary and shown in the student's detailed feedback as "Instructor adjustment to the task total". A blank `total_instructor_score` stops finalization and lists the students.
+Your `total_instructor_score` is each student's grade. The comment in the final CSV lists every lost point and adds up to the grade, followed by `final_comment`:
+
+```text
+Points lost: Validation plot has no 45-degree line (-0.5); validation discussion is brief (-1). Rounded up (+0.5). Late submission (-20). Grade: 79/100. Solid work; state your recommendation in the README.
+```
+
+The items come from `deductions`. "Rounded up" is the difference between the listed points and the grade AI Grader calculated, which rounds in the student's favor (generous-v1 rounding, and the half-point steps of the listed points). A difference between your grade and the AI grade appears with your `adjustment_reason` (or "Instructor adjustment"), and an adjustment round (curve) as "Final adjustment". A student with full marks and no changes gets `final_comment` alone. An item AI Grader cannot read as `label (-points)` is kept as written, without the rounding line, and finalization names the student. Review files from earlier versions without a `deductions` column keep `final_comment` as written.
+
+Running `generate-report` again for the same run writes the next review file and keeps what you entered in the previous one: your grades, adjustment reasons and comments you edited by hand. AI Grader writes `final_grades_for_brightspace.csv` with **Student Name, Username, Grade, Comment**, and lists (by anonymous ID) every student whose grade differs from the AI grade, for a last check. If your total differs from the sum of the AI's task scores, the difference is recorded in the instructor summary and shown in the student's detailed feedback as "Instructor adjustment to the task total". A blank `total_instructor_score` stops finalization and lists the students.
 
 ### Optional: adjust grades in your words
 
@@ -912,13 +990,13 @@ Open a terminal and activate the environment:
 .\ai-grader\.venv\Scripts\Activate.ps1
 ```
 
-Then inspect the project:
+Then check where the project stands:
 
 ```powershell
-python -m ai_grader inspect .\projects\PROJECT_ID
+python -m ai_grader status PROJECT_ID
 ```
 
-AI Grader should identify the current workflow stage and print the next command.
+AI Grader lists every stage, marks the next one, and prints the next command. Without a project name it lists every project and its current step.
 
 This is the preferred way to resume an unfinished grading project.
 
@@ -965,10 +1043,22 @@ python -m ai_grader init-project PROJECT_ID
 Create a new local grading project, or complete an existing project folder that holds a Brightspace ZIP or its extracted folders. Add `--dry-run` to preview the changes without making them.
 
 ```text
+python -m ai_grader continue PROJECT_ID [--approve]
+```
+
+Run every automatic step of the 5-stage workflow until you are needed (Section 9a). `--approve` approves the rubric after you checked it, then grading follows.
+
+```text
+python -m ai_grader status [PROJECT_ID]
+```
+
+Show the 5 stages (done, next, not yet), what needs attention, and what comes next. Without a project, list every project and its stage. Read-only; counts only, no student names. Add `--json` for machine-readable output.
+
+```text
 python -m ai_grader inspect PROJECT_PATH
 ```
 
-Inspect the project and determine the current workflow stage.
+List the project's files and determine the current workflow stage. The listing includes submission folder names (student names); prefer `status` when sharing output.
 
 ```text
 python -m ai_grader manifest PROJECT_PATH
@@ -983,10 +1073,10 @@ python -m ai_grader prepare-project PROJECT_PATH
 Generate instructor-reviewable project instructions, rubric, and reference solution.
 
 ```text
-python -m ai_grader generate-spec PROJECT_PATH
+python -m ai_grader generate-spec PROJECT_PATH [--from-response SAVED_RESPONSE.json]
 ```
 
-Generate the draft grading specification.
+Generate the draft grading specification. `--from-response` checks a saved model response again instead of making a new AI request.
 
 ```text
 python -m ai_grader validate SPEC_PATH
@@ -1010,7 +1100,7 @@ Parse, select, anonymize, and inventory student submissions. Can be rerun until 
 python -m ai_grader refresh-submission-checks PROJECT_PATH
 ```
 
-Re-check original filenames against the approved specification without replacing the anonymized submissions.
+Re-check original filenames against the approved specification without replacing the anonymized submissions. Capitalization and copy numbers such as " (1)" added by a download are not counted as naming errors.
 
 ```text
 python -m ai_grader grade-submissions PROJECT_PATH

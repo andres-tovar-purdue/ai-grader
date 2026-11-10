@@ -37,9 +37,10 @@ SCHEMA_METADATA_KEYS = ("$schema", "$id", "$comment")
 class InvalidSpecResponseError(RuntimeError):
     """The model's specification failed parsing or validation; its raw response was saved."""
 
-    def __init__(self, messages, response_path):
+    def __init__(self, messages, response_path, saved_again=True):
         self.messages = messages
         self.response_path = response_path
+        self.saved_again = saved_again  # False: it was already a saved response.
         super().__init__(
             "The generated grading specification is invalid: "
             + "; ".join(messages)
@@ -255,7 +256,11 @@ IMPORTANT RULES:
     and a clear condition. State in notes which deduction amounts are proposed
     instructor policy rather than explicitly published penalties. Set basis to
     filename and deliverable_id to the corresponding listed deliverable for every
-    filename rule. Keep filename/missing-export penalties in one owning criterion;
+    filename rule. A rule with basis file_presence also needs deliverable_id, and
+    that deliverable needs presence_patterns: patterns for the file names AI Grader
+    shows the grader, which start with artifact_###_ and have the username
+    replaced by "student" (for username_pr02_notebook.ipynb use
+    "*_pr02_notebook.ipynb"). Keep filename/missing-export penalties in one owning criterion;
     do not duplicate them in technical content criteria. New filenames are checked
     locally before anonymization. Use max_applications only for independently
     omitted requirements; rule amounts must not exceed the criterion maximum.
@@ -307,6 +312,61 @@ def parse_json_response(text):
     return json.loads(text)
 
 
+PRESENCE_NOTE = ("presence_patterns derived by AI Grader from file_patterns "
+                 "for this deliverable's file_presence rules.")
+
+
+def presence_patterns_from(file_patterns):
+    """
+    Patterns that find a required file among the anonymized artifact names
+    (artifact_###_<name>, username replaced by "student"), in any folder:
+    username_pr02_notebook.ipynb -> *_pr02_notebook.ipynb.
+    """
+
+    patterns = []
+    for pattern in file_patterns:
+        name = Path(pattern).name
+        name = re.sub(r"username", "*", name, flags=re.IGNORECASE)
+        name = re.sub(r"\*+", "*", "*" + name)
+        if name.strip("*") and name not in patterns:
+            patterns.append(name)
+    return patterns
+
+
+def fill_presence_patterns(spec):
+    """
+    Give every deliverable that a file_presence rule refers to the
+    presence_patterns that rule needs, derived from its file_patterns, when the
+    model left them out. Returns the deliverable IDs filled. Deliverables
+    without file_patterns are left alone (validation still reports them).
+    """
+
+    used = {rule.get("deliverable_id")
+            for task in spec.get("tasks", []) if isinstance(task, dict)
+            for criterion in task.get("criteria", []) if isinstance(criterion, dict)
+            for rule in criterion.get("deduction_rules", []) if isinstance(rule, dict)
+            if rule.get("basis") == "file_presence"}
+    filled = []
+    for deliverable in spec.get("deliverables", []):
+        if (not isinstance(deliverable, dict)
+                or deliverable.get("deliverable_id") not in used
+                or deliverable.get("presence_patterns")):
+            continue
+        patterns = presence_patterns_from(deliverable.get("file_patterns") or [])
+        if patterns:
+            deliverable["presence_patterns"] = patterns
+            note = deliverable.get("notes", "")
+            deliverable["notes"] = f"{note} {PRESENCE_NOTE}".strip()
+            filled.append(deliverable["deliverable_id"])
+    return filled
+
+
+def derived_presence_deliverables(spec):
+    """Deliverables whose presence_patterns AI Grader filled in."""
+    return [item.get("deliverable_id") for item in spec.get("deliverables", [])
+            if PRESENCE_NOTE in (item.get("notes") or "")]
+
+
 def strip_schema_metadata(spec):
     """Drop JSON Schema keywords the model copied to the top level of the spec."""
 
@@ -335,10 +395,11 @@ def save_invalid_response(grader_path, text):
     return response_path
 
 
-def parse_and_validate_spec(text, schema):
+def parse_and_validate_spec(text, schema, policy=None):
     """
     Return the draft spec from the model's text, or raise ValueError with
-    the reasons it is unusable.
+    the reasons it is unusable. policy: the course policy settings
+    (course_policy.policy_settings) to enforce on the spec.
     """
 
     try:
@@ -349,6 +410,10 @@ def parse_and_validate_spec(text, schema):
         raise ValueError("The response is not a JSON object.")
 
     strip_schema_metadata(spec)
+    fill_presence_patterns(spec)
+    if policy:
+        from ai_grader.course_policy import apply_policy
+        spec, _ = apply_policy(spec, policy)
     spec["status"] = "draft"
     spec.pop("approval", None)
     # Checks the schema first, then scoring totals and cross-references.
@@ -364,9 +429,13 @@ def validate_scoring_totals(spec):
 def generate_grading_spec(
     project_path,
     schema_path,
+    response_path=None,
 ):
     """
-    Generate, save, and validate a draft grading specification.
+    Generate, save, and validate a draft grading specification. With
+    response_path, use a saved model response (for example an
+    invalid_spec_response_*.json kept by an earlier run) instead of a new
+    model request.
     """
 
     project_path = Path(project_path).resolve()
@@ -390,30 +459,14 @@ def generate_grading_spec(
     ) as file:
         schema = json.load(file)
 
+    from ai_grader.course_policy import policy_settings, policy_text
+    policy = policy_settings(policy_text(project_path))
+
     prompt = build_generation_prompt(
         project_path,
         sources,
         schema,
     )
-
-    client = get_client()
-
-    response = client.responses.create(
-        model=resolve_model(),
-        instructions=(
-            "You are an instructor-supervised grading "
-            "specification agent for engineering computing "
-            "projects. Produce conservative, evidence-based "
-            "draft grading specifications for instructor review."
-        ),
-        input=prompt,
-        store=False,
-    )
-
-    if not response.output_text:
-        raise RuntimeError(
-            "The model returned no grading specification."
-        )
 
     grader_path = project_path / "grader"
     grader_path.mkdir(
@@ -421,13 +474,44 @@ def generate_grading_spec(
         exist_ok=True,
     )
 
-    try:
-        spec = parse_and_validate_spec(response.output_text, schema)
-    except (ValueError, KeyError, TypeError, StopIteration) as error:
-        response_path = save_invalid_response(grader_path, response.output_text)
-        raise InvalidSpecResponseError(
-            validation_messages(error), response_path
-        ) from None
+    if response_path is not None:
+        response_path = Path(response_path)
+        if not response_path.is_file():
+            raise FileNotFoundError(f"Saved response not found: {response_path}")
+        output_text = response_path.read_text(encoding="utf-8-sig")
+        try:
+            spec = parse_and_validate_spec(output_text, schema, policy)
+        except (ValueError, KeyError, TypeError, StopIteration) as error:
+            raise InvalidSpecResponseError(
+                validation_messages(error), response_path, saved_again=False
+            ) from None
+    else:
+        client = get_client()
+
+        response = client.responses.create(
+            model=resolve_model(),
+            instructions=(
+                "You are an instructor-supervised grading "
+                "specification agent for engineering computing "
+                "projects. Produce conservative, evidence-based "
+                "draft grading specifications for instructor review."
+            ),
+            input=prompt,
+            store=False,
+        )
+
+        if not response.output_text:
+            raise RuntimeError(
+                "The model returned no grading specification."
+            )
+
+        try:
+            spec = parse_and_validate_spec(response.output_text, schema, policy)
+        except (ValueError, KeyError, TypeError, StopIteration) as error:
+            saved_path = save_invalid_response(grader_path, response.output_text)
+            raise InvalidSpecResponseError(
+                validation_messages(error), saved_path
+            ) from None
 
     versions = [int(path.stem.rsplit("v", 1)[1])
                 for path in grader_path.glob("grading_spec_v[0-9][0-9][0-9].json")]

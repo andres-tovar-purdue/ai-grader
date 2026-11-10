@@ -40,6 +40,23 @@ stays out of Git; `projects/` is also in `.gitignore`.
 `projects\` folder and API connection. See [USER_MANUAL.md](USER_MANUAL.md) for the
 full workflow.
 
+## The 5 stages: `continue` and `status`
+
+Grading runs in 5 stages: **Set up → Rubric → Grade → Review grades → Finalize**. Drop
+the Brightspace ZIP, the assignment PDF, datasets and your solution in
+`projects\PROJECT_ID\`, then:
+
+```powershell
+python -m ai_grader continue PROJECT_ID             # every automatic step, until you are needed
+python -m ai_grader continue PROJECT_ID --approve   # after checking the rubric package with Claude
+python -m ai_grader status PROJECT_ID               # where things stand (counts only)
+```
+
+`continue` stops at your three checkpoints (approve the rubric, enter grades, enter them
+in Brightspace) and says exactly what is needed. A course's standing grading policy
+(`projects\_policies\COURSE.md`) is applied to every project of that course. See
+Section 9a of [USER_MANUAL.md](USER_MANUAL.md).
+
 ## Human-Supervised Grading Workflow
 
 The grader combines deterministic processing, AI-assisted rubric evaluation, and instructor review. AI-generated assessments remain preliminary until the instructor verifies the evidence and approves the final scores and feedback.
